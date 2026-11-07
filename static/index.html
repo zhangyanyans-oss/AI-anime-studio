@@ -178,12 +178,30 @@
 
             <div id="charactersSection" class="section hidden">
                 <h2>角色参考图</h2>
+                <div style="margin-bottom: 10px;">
+                    <span class="hint" style="display:inline;">图片比例：</span>
+                    <select id="charAspectSelect" onchange="saveCurrentProject()" style="padding:4px 8px;">
+                        <option value="portrait">竖屏 9:16（匹配视频，推荐）</option>
+                        <option value="square">方形 1:1</option>
+                        <option value="landscape">横屏 16:9</option>
+                    </select>
+                    <span class="hint" style="display:inline;">角色参考图将按此比例生成，分镜图会参考它们。</span>
+                </div>
                 <div id="charactersGrid" class="card-grid"></div>
                 <button class="btn-add" onclick="addNewItem('character')">+ 添加新角色</button>
             </div>
 
             <div id="scenesSection" class="section hidden">
                 <h2>场景参考图</h2>
+                <div style="margin-bottom: 10px;">
+                    <span class="hint" style="display:inline;">图片比例：</span>
+                    <select id="sceneAspectSelect" onchange="saveCurrentProject()" style="padding:4px 8px;">
+                        <option value="portrait">竖屏 9:16（匹配视频，推荐）</option>
+                        <option value="square">方形 1:1</option>
+                        <option value="landscape">横屏 16:9</option>
+                    </select>
+                    <span class="hint" style="display:inline;">场景参考图将按此比例生成，分镜图会参考它们。</span>
+                </div>
                 <div id="scenesGrid" class="card-grid"></div>
                 <button class="btn-add" onclick="addNewItem('scene')">+ 添加新场景</button>
             </div>
@@ -281,6 +299,8 @@
             currentData.workflowId = getSelectedWorkflowId();
             currentData.videoMode = getVideoMode();
             currentData.imageAspect = document.getElementById("aspectSelect").value;
+            currentData.charAspect = document.getElementById("charAspectSelect").value;
+            currentData.sceneAspect = document.getElementById("sceneAspectSelect").value;
             currentData.idea = document.getElementById("ideaInput").value;
 
             let dataToSave = JSON.parse(JSON.stringify(currentData));
@@ -324,6 +344,8 @@
                 document.getElementById("i2vWorkflowInput").value = savedWf;
             }
             document.getElementById("aspectSelect").value = currentData.imageAspect || "portrait";
+            document.getElementById("charAspectSelect").value = currentData.charAspect || "portrait";
+            document.getElementById("sceneAspectSelect").value = currentData.sceneAspect || "portrait";
             const modeRadio = document.querySelector(`input[name="videoMode"][value="${currentData.videoMode || "reference"}"]`);
             if (modeRadio) modeRadio.checked = true;
             onVideoModeChange();
@@ -635,9 +657,11 @@
 
             slot.innerHTML = "<div class='hint' style='color:#3b82f6'>🎨 生成中…</div>";
             try {
-                // 图片比例跟随用户选择；竖屏与视频输出(768x1344)匹配，避免视频重构图裁切变形
+                // 图片比例按各自区域的选择：角色/场景/分镜各自独立，互不影响
+                // 竖屏与视频输出(768x1344)匹配，避免视频重构图裁切变形
                 const sizeMap = { portrait: "1080x1920", square: "2048x2048", landscape: "1920x1080" };
-                const aspect = document.getElementById("aspectSelect").value || "portrait";
+                const aspectSel = type === 'char' ? "charAspectSelect" : (type === 'scene' ? "sceneAspectSelect" : "aspectSelect");
+                const aspect = (document.getElementById(aspectSel) || {}).value || "portrait";
                 const resp = await fetch(`${API}/api/generate-image`, {
                     method: "POST", headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({ prompt, size: sizeMap[aspect] || "1080x1920", reference_urls: referenceUrls.length > 0 ? referenceUrls : null }),
