@@ -68,7 +68,9 @@ class StoryRequest(BaseModel):
 
 class ImageRequest(BaseModel):
     prompt: str
-    reference_urls: list[str] | None = None 
+    reference_urls: list[str] | None = None
+    reference_meta: list[Dict[str, Any]] | None = None  # 与 reference_urls 一一对应：{kind, name, description}
+    context: str | None = None  # 生成上下文（分镜/场景描述），用于筛选相关参考
     size: str = "2048x2048"
 
 class VideoRequest(BaseModel):
@@ -210,6 +212,74 @@ async def generate_story(req: StoryRequest):
         raise HTTPException(500, str(e))
 
 # ---------- 3. 豆包生图 (存本地返回 URL) ----------
+MAX_REF_IMAGES = 10  # 豆包 seedream 参考图上限
+
+def select_relevant_references(pool: list[str], meta: list[Dict[str, Any]] | None, context: str) -> list[int]:
+    """从候选参考图中筛选与当前画面相关的子集（豆包上限 10 张）。
+
+    策略：
+    1. 总数不超限 → 全部使用（不加延迟）
+    2. 超限 → 先按名字出现在上下文中做关键词匹配（零开销）
+    3. 关键词匹配后仍超限或匹配为空 → DeepSeek 按语义挑选相关的（角色优先）
+    4. 兜底：任何环节失败则取前 10 张
+    """
+    if len(pool) <= MAX_REF_IMAGES:
+        return list(range(len(pool)))
+
+    meta = meta or []
+    # 第一步：关键词匹配
+    kw_hits = []
+    for i, m in enumerate(meta[:len(pool)]):
+        name = str(m.get("name") or "").strip()
+        if name and len(name) >= 2 and name in context:
+            kw_hits.append(i)
+    if 0 < len(kw_hits) <= MAX_REF_IMAGES:
+        print(f"[参考图筛选] {len(pool)} 张 -> 关键词命中 {len(kw_hits)} 张: {kw_hits}")
+        return kw_hits
+
+    # 第二步：DeepSeek 语义精选
+    try:
+        candidates = []
+        for i in range(min(len(pool), len(meta)) if meta else 0):
+            m = meta[i]
+            candidates.append({
+                "index": i,
+                "kind": m.get("kind", ""),
+                "name": str(m.get("name") or ""),
+                "description": str(m.get("description") or "")[:80],
+            })
+        if candidates:
+            response = deepseek_client.chat.completions.create(
+                model="deepseek-chat",
+                messages=[
+                    {"role": "system", "content": (
+                        "你是分镜参考图筛选器。给定画面描述和候选参考图列表（index/kind/name/description），"
+                        "挑选与该画面相关的参考图。规则：只输出 JSON {\"indices\": [..]}；"
+                        "最多选 " + str(MAX_REF_IMAGES) + " 个；无关的不要选；"
+                        "画面中出现某角色时必须选该角色的参考图；场景相关的场景图优先。"
+                    )},
+                    {"role": "user", "content": f"画面描述：{context}\n\n候选：{json.dumps(candidates, ensure_ascii=False)}"},
+                ],
+                response_format={"type": "json_object"},
+                max_tokens=200,
+                temperature=0.1,
+            )
+            data = json.loads(response.choices[0].message.content)
+            picked = [int(i) for i in data.get("indices", []) if isinstance(i, (int, str)) and str(i).lstrip("-").isdigit()]
+            picked = [i for i in picked if 0 <= i < len(pool)]
+            # 去重保序，角色优先排序
+            seen, ordered = set(), []
+            for i in sorted(set(picked), key=lambda x: (0 if meta[x].get("kind") == "character" else 1, x)):
+                if i not in seen:
+                    seen.add(i); ordered.append(i)
+            if ordered:
+                print(f"[参考图筛选] {len(pool)} 张 -> DeepSeek 精选 {len(ordered[:MAX_REF_IMAGES])} 张: {ordered[:MAX_REF_IMAGES]}")
+                return ordered[:MAX_REF_IMAGES]
+    except Exception as e:
+        print(f"[参考图筛选] DeepSeek 精选失败，回退前 {MAX_REF_IMAGES} 张: {type(e).__name__}: {e}")
+
+    return list(range(MAX_REF_IMAGES))
+
 @app.post("/api/generate-image")
 async def generate_image(req: ImageRequest):
     payload = {
@@ -220,18 +290,18 @@ async def generate_image(req: ImageRequest):
         "watermark": False,
     }
     if req.reference_urls and len(req.reference_urls) > 0:
-        # 豆包云端无法下载本机 127.0.0.1 URL（connection refused），与视频生成同样处理：
+        # 先按相关性筛选（关键词 -> DeepSeek），再转换；豆包云端无法下载本机 127.0.0.1 URL，
         # 本地图一律转 base64 data URI 直传，公网 URL 原样保留
+        context = (req.context or req.prompt or "").strip()
+        picked = select_relevant_references(req.reference_urls, req.reference_meta, context)
         resolved = []
-        for u in req.reference_urls:
+        for i in picked:
+            u = req.reference_urls[i]
             if u.startswith(("http://127.0.0.1", "http://localhost", "/static/")):
                 resolved.append(local_url_to_data_uri(u))
             else:
                 resolved.append(u)
-        # 豆包 seedream 上限 10 张参考图，超出部分截断（前端顺序角色在前，优先保留角色）
-        if len(resolved) > 10:
-            resolved = resolved[:10]
-        payload["image"] = resolved
+        payload["image"] = resolved[:MAX_REF_IMAGES]  # 最终安全上限
 
     headers = {
         "Authorization": f"Bearer {DOUBAO_API_KEY}",
