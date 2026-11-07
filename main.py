@@ -220,7 +220,15 @@ async def generate_image(req: ImageRequest):
         "watermark": False,
     }
     if req.reference_urls and len(req.reference_urls) > 0:
-        payload["image"] = req.reference_urls
+        # 豆包云端无法下载本机 127.0.0.1 URL（connection refused），与视频生成同样处理：
+        # 本地图一律转 base64 data URI 直传，公网 URL 原样保留
+        resolved = []
+        for u in req.reference_urls:
+            if u.startswith(("http://127.0.0.1", "http://localhost", "/static/")):
+                resolved.append(local_url_to_data_uri(u))
+            else:
+                resolved.append(u)
+        payload["image"] = resolved
 
     headers = {
         "Authorization": f"Bearer {DOUBAO_API_KEY}",

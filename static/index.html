@@ -625,7 +625,11 @@
                     method: "POST", headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({ idea: idea, image_base64: mainImageBase64, chat_history: history.length > 0 ? history : null }),
                 });
-                if (!resp.ok) throw new Error("生成失败");
+                if (!resp.ok) {
+                    let detail = `HTTP ${resp.status}`;
+                    try { const j = await resp.json(); detail = j.detail || JSON.stringify(j).slice(0, 200); } catch (_) {}
+                    throw new Error(detail);
+                }
                 const data = await resp.json();
                 currentData.storyData = data;
                 if (currentData.storyData.storyboards) {
@@ -670,7 +674,11 @@
                     method: "POST", headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({ prompt, size: sizeMap[aspect] || "1080x1920", reference_urls: referenceUrls.length > 0 ? referenceUrls : null }),
                 });
-                if (!resp.ok) throw new Error("生成失败");
+                if (!resp.ok) {
+                    let detail = `HTTP ${resp.status}`;
+                    try { const j = await resp.json(); detail = j.detail || JSON.stringify(j).slice(0, 200); } catch (_) {}
+                    throw new Error(detail);
+                }
                 const data = await resp.json();
                 
                 // 后端已返回 URL，直接拼接主机名
