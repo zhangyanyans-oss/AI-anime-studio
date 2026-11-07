@@ -1,0 +1,28 @@
+# 密钥配置（绝不上传）
+.env
+
+# Python
+venv/
+__pycache__/
+*.pyc
+
+# 打包产物与中间文件
+dist/
+build/
+*.spec
+
+# 运行时生成的用户数据（图片/视频/临时文件）
+static/uploads/
+static/temp/
+static/local_edit/
+exe_test.log
+
+# WPS 本地编辑注入的辅助文件（非项目本体）
+static/wps-edit.js
+
+# 工作区记忆（本地使用记录）
+.workbuddy/
+
+# 测试目录
+test_share/
+share_test/
