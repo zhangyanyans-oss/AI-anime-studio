@@ -961,13 +961,13 @@
                 const currentPrompt = c.edited_prompt || c.image_prompt || c.description;
                 const card = document.createElement("div"); card.className = "card";
                 card.innerHTML = `
-                    <div style="display:flex; align-items:center;"><div class="label" style="flex:1;">${c.name || "角色 " + (i+1)}</div><button class="btn-del-item" onclick="deleteItem('character', ${i})">删除</button></div>
+                    <div style="display:flex; align-items:center;"><input class="label" style="flex:1; min-width:0; border:none; border-bottom:1px dashed transparent; background:transparent; padding:0; font-weight:600; color:inherit; font-size:inherit;" title="点击修改名称" value="${escapeAttr(c.name || "角色 " + (i+1))}" onchange="renameItem('character', ${i}, this.value)"><button class="btn-del-item" onclick="deleteItem('character', ${i})">删除</button></div>
                     <div class="value">${renderMarkdown(c.description || "")}</div>
                     <textarea id="char-prompt-${i}" class="prompt-edit-area" onchange="updatePrompt('character', ${i}, this.value)">${currentPrompt}</textarea>
                     <div class="image-slot" id="char-img-${i}" ${savedImg ? `data-image-url="${savedImg}"` : ''}>${savedImg ? `<img src="${savedImg}">` : ''}</div>
                     <div style="margin-top:12px; display:flex; flex-wrap:wrap; gap:10px;">
                         <button onclick="genImage('char', ${i})" style="flex:1;">${savedImg ? '重新生成' : '生成'}</button>
-                        ${savedImg ? `<button class="btn-download" onclick="downloadImage('${savedImg}', '角色_${c.name}.png')">📥 保存原图</button>` : ''}
+                        ${savedImg ? `<button class="btn-download" onclick="downloadImage('${savedImg}', '角色_${escapeAttr(c.name || "角色")}.png')">📥 保存原图</button>` : ''}
                     </div>
                 `; charGrid.appendChild(card);
             });
@@ -980,13 +980,13 @@
                 const currentPrompt = s.edited_prompt || s.image_prompt || s.description;
                 const card = document.createElement("div"); card.className = "card";
                 card.innerHTML = `
-                    <div style="display:flex; align-items:center;"><div class="label" style="flex:1;">${s.name || "场景 " + (i+1)}</div><button class="btn-del-item" onclick="deleteItem('scene', ${i})">删除</button></div>
+                    <div style="display:flex; align-items:center;"><input class="label" style="flex:1; min-width:0; border:none; border-bottom:1px dashed transparent; background:transparent; padding:0; font-weight:600; color:inherit; font-size:inherit;" title="点击修改名称" value="${escapeAttr(s.name || "场景 " + (i+1))}" onchange="renameItem('scene', ${i}, this.value)"><button class="btn-del-item" onclick="deleteItem('scene', ${i})">删除</button></div>
                     <div class="value">${renderMarkdown(s.description || "")}</div>
                     <textarea id="scene-prompt-${i}" class="prompt-edit-area" onchange="updatePrompt('scene', ${i}, this.value)">${currentPrompt}</textarea>
                     <div class="image-slot" id="scene-img-${i}" ${savedImg ? `data-image-url="${savedImg}"` : ''}>${savedImg ? `<img src="${savedImg}">` : ''}</div>
                     <div style="margin-top:12px; display:flex; flex-wrap:wrap; gap:10px;">
                         <button onclick="genImage('scene', ${i})" style="flex:1;">${savedImg ? '重新生成' : '生成'}</button>
-                        ${savedImg ? `<button class="btn-download" onclick="downloadImage('${savedImg}', '场景_${s.name}.png')">📥 保存原图</button>` : ''}
+                        ${savedImg ? `<button class="btn-download" onclick="downloadImage('${savedImg}', '场景_${escapeAttr(s.name || "场景")}.png')">📥 保存原图</button>` : ''}
                     </div>
                 `; sceneGrid.appendChild(card);
             });
@@ -1002,6 +1002,19 @@
             if (type === 'character') currentData.storyData.characters[index].edited_prompt = newValue;
             if (type === 'scene') currentData.storyData.scenes[index].edited_prompt = newValue;
             saveCurrentProject();
+        }
+        // HTML 属性转义（名字里可能带引号，直接拼进 value 会截断）
+        function escapeAttr(s) {
+            return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+        }
+        function renameItem(type, index, newName) {
+            if (!currentData.storyData) return;
+            newName = (newName || "").trim();
+            if (!newName) return alert("名称不能为空");
+            if (type === 'character') currentData.storyData.characters[index].name = newName;
+            if (type === 'scene') currentData.storyData.scenes[index].name = newName;
+            saveCurrentProject();
+            renderStory(currentData.storyData, true);  // 重渲染让"保存原图"文件名等同步更新
         }
         function updateStoryboardPrompt(id, newValue) {
             const sb = currentData.storyData.storyboards.find(s => s._id === id);
