@@ -69,6 +69,8 @@
         .chat-user { background: var(--primary); color: #fff; border-bottom-right-radius: 4px; }
         .chat-input-row { display: flex; gap: 10px; align-items: flex-end;}
         .chat-input-row textarea { flex: 1; padding: 12px; font-size: 14px; min-height: 44px; max-height: 120px; }
+        @keyframes genSlide { from { margin-left: -40%; } to { margin-left: 100%; } }
+        .gen-loading-bar { width: 40%; height: 100%; background: var(--primary); border-radius: 9999px; animation: genSlide 1.2s ease-in-out infinite; }
     </style>
 </head>
 <body>
@@ -667,7 +669,17 @@
                 if (referenceUrls.length) prompt += "。画面中若出现参考图里的角色，其长相、发型、服装配饰必须与参考图完全一致；整体画风、色调、光影必须与参考图保持同一部作品的风格统一";
             }
 
-            slot.innerHTML = "<div class='hint' style='color:#3b82f6'>🎨 生成中…</div>";
+            // 生图进度条：动画条 + 已等待秒数
+            slot.innerHTML = `
+                <div style="font-size:13px; font-weight:600; color:var(--primary); margin-bottom:6px;">🎨 生成中… 已等待 <span class="gen-timer">0</span> 秒</div>
+                <div style="background:#dbeafe; border-radius:9999px; height:8px; overflow:hidden;">
+                    <div class="gen-loading-bar"></div>
+                </div>`;
+            const genT0 = Date.now();
+            const genTimer = setInterval(() => {
+                const el = slot.querySelector(".gen-timer");
+                if (el) el.textContent = Math.floor((Date.now() - genT0) / 1000);
+            }, 1000);
             try {
                 // 图片比例按各自区域的选择：角色/场景/分镜各自独立，互不影响
                 // 竖屏与视频输出(768x1344)匹配，避免视频重构图裁切变形
@@ -706,6 +718,7 @@
                 saveCurrentProject();
                 renderStory(currentData.storyData, true);
             } catch (e) { slot.innerHTML = `<div class='hint' style='color:#ef4444;'>失败: ${e.message}</div>`; }
+            finally { clearInterval(genTimer); }
         }
 
         function downloadImage(imgSrc, filename) {
