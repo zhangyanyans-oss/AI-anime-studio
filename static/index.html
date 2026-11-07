@@ -200,7 +200,7 @@
                         <option value="square">方形 1:1</option>
                         <option value="landscape">横屏 16:9</option>
                     </select>
-                    <span class="hint" style="display:inline;">场景参考图将按此比例生成，分镜图会参考它们。</span>
+                    <span class="hint" style="display:inline;">场景图会自动参考已生成的<b>角色图</b>（人物长相、服装、画风保持一致）；分镜图又会参考场景图。</span>
                 </div>
                 <div id="scenesGrid" class="card-grid"></div>
                 <button class="btn-add" onclick="addNewItem('scene')">+ 添加新场景</button>
@@ -653,6 +653,10 @@
             if (type === 'sb') {
                 document.querySelectorAll('[id^="char-img-"]').forEach(c => { if (c.dataset.imageUrl) referenceUrls.push(c.dataset.imageUrl); });
                 document.querySelectorAll('[id^="scene-img-"]').forEach(c => { if (c.dataset.imageUrl) referenceUrls.push(c.dataset.imageUrl); });
+            } else if (type === 'scene') {
+                // 场景参考图也参考已生成的角色图：人物长相、服装、画风保持一致
+                document.querySelectorAll('[id^="char-img-"]').forEach(c => { if (c.dataset.imageUrl) referenceUrls.push(c.dataset.imageUrl); });
+                if (referenceUrls.length) prompt += "。画面中若出现参考图里的角色，其长相、发型、服装配饰必须与参考图完全一致；整体画风、色调、光影必须与参考图保持同一部作品的风格统一";
             }
 
             slot.innerHTML = "<div class='hint' style='color:#3b82f6'>🎨 生成中…</div>";
