@@ -98,24 +98,34 @@
                     <label style="cursor: pointer;"><input type="radio" name="videoMode" value="last_frame" onchange="onVideoModeChange()"> 🏁 尾帧</label>
                     <label style="cursor: pointer;"><input type="radio" name="videoMode" value="first_last" onchange="onVideoModeChange()"> 🎞️ 首尾帧</label>
                     <span style="flex:1"></span>
-                    <select id="workflowSelect" onchange="saveCurrentProject()">
-                        <optgroup label="多图多音频参考 · zm 系列">
-                            <option value="minimax_h3_zm_u24">H3多图多音频生视频(升级画质) - 默认</option>
-                            <option value="minimax_h3_zm_u30">H3多图多音频生视频(超清画质)</option>
-                            <option value="minimax_h3_zm_nonoo">H3多图多音频生视频(影视画质)</option>
-                            <option value="minimax_h3_zm_u08">H3多图多音频生视频(高速版)</option>
+                    <select id="workflowSelect" onchange="onWorkflowChange()">
+                        <optgroup label="🏁 首尾帧（一致性最高，配首帧/尾帧/首尾帧模式）">
+                            <option value="minimax_h3_lightx2v" data-kind="i2v">H3首尾帧生成视频 · 768p · 1-15s（默认）</option>
+                            <option value="minimax_h3_b99_002" data-kind="i2v">H3首尾帧生成视频(高画版) · 736p</option>
                         </optgroup>
-                        <optgroup label="其他参考/全能工作流">
-                            <option value="minimax_h3_z0902">H3 全能参考 · 最多6图 · 1-15s</option>
-                            <option value="minimax_h3_lightx2v_v5">H3 全能参考 · 最多9图 · 1-10s</option>
-                            <option value="minimax_h3_lightx2v_v5_15s">H3 全能参考 · 最多9图 · 1-15s</option>
-                            <option value="minimax_h3_b99_003_12s">H3 全能参考 · 736p · 最多9图 · 1-12s</option>
+                        <optgroup label="🖼️ 多图参考">
+                            <option value="minimax_h3_zm_u24" data-kind="ref">H3多图多音频生视频(升级画质) - 默认</option>
+                            <option value="minimax_h3_zm_u30" data-kind="ref">H3多图多音频生视频(超清画质)</option>
+                            <option value="minimax_h3_zm_nonoo" data-kind="ref">H3多图多音频生视频(影视画质)</option>
+                            <option value="minimax_h3_zm_u08" data-kind="ref">H3多图多音频生视频(高速版)</option>
+                            <option value="minimax_h3_lightx2v_v5" data-kind="ref">H3多图参考生视频 · 最多9图 · 1-10s</option>
+                            <option value="minimax_h3_lightx2v_v5_15s" data-kind="ref">H3多图生视频15秒 · 最多9图 · 1-15s</option>
+                            <option value="minimax_h3_z0902" data-kind="ref">H3九图生视频(多图一致性创作)</option>
+                            <option value="minimax_h3_zm_u22" data-kind="ref">H3多图多音频生视频(视频版)</option>
+                            <option value="minimax_h3_b99_003_12s" data-kind="ref">H3多图生视频12秒 · 736p</option>
                         </optgroup>
-                    </select>
-                    <select id="i2vWorkflowSelect" class="hidden" onchange="onI2vSelectChange()">
-                        <option value="minimax_h3_lightx2v">H3 首尾帧 · 768p · 1-15s（默认）</option>
-                        <option value="minimax_h3_b99_002">H3 首尾帧 · 736p · 支持 Seed</option>
-                        <option value="custom">✏️ 自定义工作流 ID…</option>
+                        <optgroup label="📝 文生视频（无需分镜图）">
+                            <option value="minimax_h3_lightx2v_no_pic" data-kind="text">H3文生视频 · 1-15s</option>
+                            <option value="minimax_h3_z0901" data-kind="text">H3文生视频</option>
+                            <option value="minimax_h3_b99_001" data-kind="text">H3文生视频</option>
+                        </optgroup>
+                        <optgroup label="🎵 需上传音频（界面暂不支持）">
+                            <option value="minimax_h3_image_audio_to_video_v2" data-kind="audio" disabled>H3多图多音频生视频 · 最多9图3音频</option>
+                            <option value="minimax_h3_z0903" data-kind="audio" disabled>H3九图三音生视频(高质量音画融合)</option>
+                        </optgroup>
+                        <optgroup label="其他">
+                            <option value="custom" data-kind="custom">✏️ 自定义工作流 ID…</option>
+                        </optgroup>
                     </select>
                     <input type="text" id="i2vWorkflowInput" class="hidden" value="minimax_h3_lightx2v" placeholder="输入工作流 ID" style="width: 220px;" onchange="saveCurrentProject()">
                 </div>
@@ -268,9 +278,8 @@
             if (projIndex === -1) return;
 
             currentData.name = document.getElementById("projectNameInput").value || "未命名项目";
-            currentData.workflowId = document.getElementById("workflowSelect").value;
+            currentData.workflowId = getSelectedWorkflowId();
             currentData.videoMode = getVideoMode();
-            currentData.i2vWorkflowId = getI2vWorkflowId();
             currentData.imageAspect = document.getElementById("aspectSelect").value;
             currentData.idea = document.getElementById("ideaInput").value;
 
@@ -299,18 +308,21 @@
             if(!currentData.images) currentData.images = {};
 
             document.getElementById("projectNameInput").value = currentData.name;
-            document.getElementById("workflowSelect").value = currentData.workflowId;
-            // 修正旧数据里的错误拼写（light2v / light2xv 均为误读，真名是 lightx2v）
-            let i2vId = currentData.i2vWorkflowId || "minimax_h3_lightx2v";
-            if (i2vId === "minimax_h3_light2v" || i2vId === "minimax_h3_light2xv") i2vId = "minimax_h3_lightx2v";
-            // 保存的 ID 在下拉选项里则直接选中，否则走"自定义"并回填手输框
-            const i2vSel = document.getElementById("i2vWorkflowSelect");
-            if ([...i2vSel.options].some(o => o.value === i2vId)) {
-                i2vSel.value = i2vId;
-            } else {
-                i2vSel.value = "custom";
+            // 恢复工作流：旧数据 videoMode 非 reference 时 i2vWorkflowId 才是生效工作流（旧版双下拉结构），统一迁移
+            let savedWf = currentData.workflowId || "minimax_h3_zm_u24";
+            if ((currentData.videoMode || "reference") !== "reference" && currentData.i2vWorkflowId) {
+                savedWf = currentData.i2vWorkflowId;
             }
-            document.getElementById("i2vWorkflowInput").value = i2vId;
+            // 修正旧数据里的错误拼写（light2v / light2xv 均为误读，真名是 lightx2v）
+            if (savedWf === "minimax_h3_light2v" || savedWf === "minimax_h3_light2xv") savedWf = "minimax_h3_lightx2v";
+            const wfSel = document.getElementById("workflowSelect");
+            if ([...wfSel.options].some(o => o.value === savedWf)) {
+                wfSel.value = savedWf;
+                document.getElementById("i2vWorkflowInput").value = savedWf;
+            } else {
+                wfSel.value = "custom";
+                document.getElementById("i2vWorkflowInput").value = savedWf;
+            }
             document.getElementById("aspectSelect").value = currentData.imageAspect || "portrait";
             const modeRadio = document.querySelector(`input[name="videoMode"][value="${currentData.videoMode || "reference"}"]`);
             if (modeRadio) modeRadio.checked = true;
@@ -949,30 +961,41 @@
             };
             document.getElementById("videoModeHint").textContent = hints[mode];
             const useI2v = mode !== "reference";
-            document.getElementById("workflowSelect").classList.toggle("hidden", useI2v);
-            document.getElementById("i2vWorkflowSelect").classList.toggle("hidden", !useI2v);
+            // 工作流与模式联动：切到首帧/尾帧/首尾帧时若当前不是首尾帧工作流，自动切到默认首尾帧工作流；反之亦然
+            const kind = getWorkflowKind();
+            if (useI2v && kind !== "i2v" && kind !== "custom") {
+                document.getElementById("workflowSelect").value = "minimax_h3_lightx2v";
+            } else if (!useI2v && kind === "i2v") {
+                document.getElementById("workflowSelect").value = "minimax_h3_zm_u24";
+            }
             // 仅当选了"自定义"时才显示手输框
-            document.getElementById("i2vWorkflowInput").classList.toggle("hidden", !useI2v || document.getElementById("i2vWorkflowSelect").value !== "custom");
+            document.getElementById("i2vWorkflowInput").classList.toggle("hidden", getWorkflowKind() !== "custom");
             document.getElementById("i2vHint").classList.toggle("hidden", !useI2v);
             saveCurrentProject();
         }
 
-        // 首尾帧工作流：下拉选择 或 自定义 ID
-        function getI2vWorkflowId() {
-            const sel = document.getElementById("i2vWorkflowSelect").value;
-            return sel === "custom" ? document.getElementById("i2vWorkflowInput").value.trim() : sel;
+        // 当前选中工作流的类别：i2v=首尾帧 / ref=多图参考 / text=文生视频 / audio=需音频 / custom=自定义
+        function getWorkflowKind() {
+            const sel = document.getElementById("workflowSelect");
+            const opt = sel.options[sel.selectedIndex];
+            return opt ? (opt.dataset.kind || "ref") : "ref";
         }
-        function onI2vSelectChange() {
-            const sel = document.getElementById("i2vWorkflowSelect");
-            const input = document.getElementById("i2vWorkflowInput");
-            if (sel.value === "custom") {
-                input.classList.remove("hidden");
-                input.focus();
-            } else {
-                input.classList.add("hidden");
-                input.value = sel.value;
+        function getSelectedWorkflowId() {
+            const sel = document.getElementById("workflowSelect");
+            return sel.value === "custom" ? document.getElementById("i2vWorkflowInput").value.trim() : sel.value;
+        }
+        function onWorkflowChange() {
+            const kind = getWorkflowKind();
+            const mode = getVideoMode();
+            // 按工作流类别自动切到匹配的生成模式
+            if (kind === "i2v" && mode === "reference") {
+                document.querySelector('input[name="videoMode"][value="first_frame"]').checked = true;
+            } else if ((kind === "ref" || kind === "text") && mode !== "reference") {
+                document.querySelector('input[name="videoMode"][value="reference"]').checked = true;
             }
-            saveCurrentProject();
+            document.getElementById("i2vWorkflowInput").classList.toggle("hidden", kind !== "custom");
+            if (kind === "custom") document.getElementById("i2vWorkflowInput").focus();
+            onVideoModeChange(); // 统一刷新提示、联动与保存
         }
         async function genVideo(sbId) {
             const sbItem = currentData.storyData.storyboards.find(s => s._id === sbId);
@@ -982,7 +1005,7 @@
             const sbImages = (sbItem.images && sbItem.images.length)
                 ? sbItem.images
                 : (sbItem.imgSrc ? [{ url: sbItem.imgSrc, role: "" }] : []);
-            if (!sbImages.length) return alert("请先生成分镜图");
+            if (!sbImages.length && getWorkflowKind() !== "text") return alert("请先生成分镜图（或选择「📝 文生视频」工作流）");
 
             const mode = getVideoMode();
             const taggedFirst = sbImages.find(im => im.role === "first");
@@ -993,8 +1016,8 @@
                 // 参考模式：所有分镜图都作为参考图（最多 9 张）
                 body = { image_urls: sbImages.slice(0, 9).map(im => im.url), frame_mode: "reference" };
             } else {
-                const workflowId = getI2vWorkflowId();
-                if (!workflowId) return alert("首尾帧模式需要填入工作流 ID（如 minimax_h3_lightx2v）。");
+                const workflowId = getSelectedWorkflowId();
+                if (!workflowId) return alert("请选择或填入工作流 ID（如 minimax_h3_lightx2v）。");
 
                 if (mode === "first_frame") {
                     const firstUrl = (taggedFirst || sbImages[0]).url;
@@ -1022,12 +1045,12 @@
                 let prompt = sbItem.edited_prompt || sbItem.image_prompt || sbItem.description;
                 let workflowId;
                 if (mode === "reference") {
-                    workflowId = document.getElementById("workflowSelect").value;
+                    workflowId = getSelectedWorkflowId();
                     if (document.getElementById("strictRefCheck").checked) {
                         prompt += "。镜头完全固定，角色保持参考图中的姿势和位置不变，仅允许眨眼、呼吸、尾巴轻摆等细微动作。全程不得新增或删除任何画面元素，角色的外貌、服装、配饰、姿势，以及背景陈设、光影与画风必须与参考图完全一致，保持静止画面般的稳定";
                     }
                 } else {
-                    workflowId = getI2vWorkflowId();
+                    workflowId = getSelectedWorkflowId();
                     if (mode === "first_last") {
                         prompt += "。视频从首帧画面自然过渡演化到尾帧画面，过渡过程平滑连贯，保持角色造型、服装配饰与画风一致";
                     }
