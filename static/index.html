@@ -657,6 +657,12 @@
             if (type === 'sb') {
                 document.querySelectorAll('[id^="char-img-"]').forEach(c => { if (c.dataset.imageUrl) referenceUrls.push(c.dataset.imageUrl); });
                 document.querySelectorAll('[id^="scene-img-"]').forEach(c => { if (c.dataset.imageUrl) referenceUrls.push(c.dataset.imageUrl); });
+                // 豆包上限 10 张：角色图排前面优先保留，超出部分丢弃并提示
+                if (referenceUrls.length > 10) {
+                    const dropped = referenceUrls.length - 10;
+                    referenceUrls = referenceUrls.slice(0, 10);
+                    alert(`参考图共 ${referenceUrls.length + dropped} 张，超出豆包上限 10 张，已保留全部角色图并丢弃靠后的 ${dropped} 张场景图。如需某张场景图生效，可先隐藏不用的角色图再重新生成。`);
+                }
             } else if (type === 'scene') {
                 // 场景参考图也参考已生成的角色图：人物长相、服装、画风保持一致
                 document.querySelectorAll('[id^="char-img-"]').forEach(c => { if (c.dataset.imageUrl) referenceUrls.push(c.dataset.imageUrl); });

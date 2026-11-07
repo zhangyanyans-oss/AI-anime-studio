@@ -228,6 +228,9 @@ async def generate_image(req: ImageRequest):
                 resolved.append(local_url_to_data_uri(u))
             else:
                 resolved.append(u)
+        # 豆包 seedream 上限 10 张参考图，超出部分截断（前端顺序角色在前，优先保留角色）
+        if len(resolved) > 10:
+            resolved = resolved[:10]
         payload["image"] = resolved
 
     headers = {
