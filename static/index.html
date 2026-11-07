@@ -158,8 +158,8 @@
                 <div id="chatContainer" class="chat-container"></div>
                 <div id="chatImagePreviewArea" class="input-attachment hidden"></div>
                 <div class="chat-input-row">
-                    <input type="file" id="chatImageInput" accept="image/*" onchange="handleChatImageSelect(event)" style="display:none;">
-                    <label for="chatImageInput" class="label-upload" style="height: 44px; padding: 0 16px;">📎</label>
+                    <input type="file" id="chatImageInput" accept="image/*,.txt,.md,.csv,.pdf,.docx,.doc" onchange="handleChatAttachmentSelect(event)" style="display:none;">
+                    <label for="chatImageInput" class="label-upload" style="height: 44px; padding: 0 16px;" title="上传图片 / txt / Word(docx) / PDF 附件">📎</label>
                     <textarea id="chatInput" placeholder="输入回答..." oninput="autoResizeTextarea(this)" onkeydown="handleChatKeyDown(event)"></textarea>
                     <button onclick="sendChatMessage()" id="chatSendBtn">发送</button>
                 </div>
@@ -428,10 +428,49 @@
             const reader = new FileReader();
             reader.onload = function(e) {
                 chatImageBase64 = e.target.result.split(',')[1];
-                document.getElementById("chatImagePreviewArea").innerHTML = `<img src="${e.target.result}" height="60" style="border-radius:6px;"> <button onclick="clearChatImage()">取消</button>`;
-                document.getElementById("chatImagePreviewArea").classList.remove("hidden");
+                renderChatAttachments();
             }; reader.readAsDataURL(file);
         }
+
+        // ===== 聊天附件：图片 + 文档（txt/md/csv/pdf/docx，后端解析为文本注入上下文） =====
+        let chatAttachments = []; // [{name, text}]
+        function handleChatAttachmentSelect(event) {
+            const file = event.target.files[0]; if (!file) return;
+            if (file.type.startsWith("image/")) {
+                handleChatImageSelect(event);
+                return;
+            }
+            // 文档类：交给后端解析成文本
+            const area = document.getElementById("chatImagePreviewArea");
+            area.classList.remove("hidden");
+            const pending = document.createElement("div");
+            pending.className = "hint"; pending.id = "attach-pending";
+            pending.textContent = `⏳ 正在解析 ${file.name}…`;
+            area.appendChild(pending);
+            const fd = new FormData();
+            fd.append("file", file);
+            fetch(`${API}/api/extract-file`, { method: "POST", body: fd })
+                .then(r => r.json().then(j => ({ ok: r.ok, j })))
+                .then(({ ok, j }) => {
+                    pending.remove();
+                    if (!ok) throw new Error(j.detail || "解析失败");
+                    chatAttachments.push({ name: j.name, text: j.text });
+                    renderChatAttachments();
+                })
+                .catch(e => { pending.remove(); alert("附件解析失败：" + e.message); });
+            event.target.value = "";
+        }
+        function renderChatAttachments() {
+            const area = document.getElementById("chatImagePreviewArea");
+            const imgHtml = chatImageBase64 ? `<img src="data:image/jpeg;base64,${chatImageBase64}" height="60" style="border-radius:6px;"> <button onclick="clearChatImage()">取消</button>` : "";
+            const docHtml = chatAttachments.map((a, i) =>
+                `<span style="background:#eef2ff; border:1px solid #c7d2fe; color:#3730a3; padding:6px 10px; border-radius:8px; font-size:12px; display:inline-flex; align-items:center; gap:6px;">📄 ${a.name}（${a.text.length}字） <button onclick="removeChatAttachment(${i})" title="移除附件" style="padding:0 6px;">✕</button></span>`
+            ).join("");
+            area.innerHTML = imgHtml + docHtml;
+            area.classList.toggle("hidden", !(imgHtml + docHtml).trim());
+        }
+        function removeChatAttachment(i) { chatAttachments.splice(i, 1); renderChatAttachments(); }
+        function clearChatAttachments() { chatAttachments = []; renderChatAttachments(); }
         function clearChatImage() {
             chatImageBase64 = null;
             const input = document.getElementById("chatImageInput"); if (input) input.value = "";
@@ -479,16 +518,22 @@
             clearChatImage(); saveCurrentProject(); sendChatMessage("", true); 
         }
 
+        function collapseAttachments(t) {
+            // 历史消息里可能带整段附件文本，气泡里折叠成一行标签（完整内容仍在上下文中）
+            return (t || "").replace(/📎【附件·(.+?)】\n[\s\S]*?(?=\n?📎【附件·|$)/g, (m, n) => `📎 附件「${n}」（内容已注入上下文）`);
+        }
+
         function appendChatBubble(role, text, imgBase64 = null, saveToHistory = true) {
             const container = document.getElementById("chatContainer");
             const wrapper = document.createElement("div");
             wrapper.className = `chat-bubble-wrapper ${role === 'ai' ? 'ai' : 'user'}`;
             const bubble = document.createElement("div");
             bubble.className = `chat-bubble ${role === 'ai' ? 'chat-ai' : 'chat-user'}`;
-            
+
             const textNode = document.createElement("div");
-            if (role === 'ai') textNode.innerHTML = renderMarkdown(text);
-            else textNode.textContent = text;
+            const displayText = collapseAttachments(text);
+            if (role === 'ai') textNode.innerHTML = renderMarkdown(displayText);
+            else textNode.textContent = displayText;
             bubble.appendChild(textNode);
 
             if (imgBase64) {
@@ -511,13 +556,16 @@
             const inputField = document.getElementById("chatInput");
             const sendBtn = document.getElementById("chatSendBtn");
             const text = isInit ? "" : (userInput || inputField.value.trim());
-            if (!isInit && !text && !chatImageBase64) return;
+            const attachBlock = chatAttachments.map(a => `\n\n📎【附件·${a.name}】\n${a.text}`).join("");
+            const fullText = ((text || "") + attachBlock).trim();
+            if (!isInit && !text && !chatImageBase64 && !chatAttachments.length) return;
 
             const imgToSend = chatImageBase64;
             if (!isInit) {
-                appendChatBubble('user', text, imgToSend);
-                currentData.chatHistory.push({"role": "user", "content": text || "[图片]"});
-                inputField.value = ""; inputField.style.height = 'auto'; clearChatImage();
+                const bubbleText = (text || "") + chatAttachments.map(a => `\n📎 ${a.name}`).join("");
+                appendChatBubble('user', bubbleText, imgToSend);
+                currentData.chatHistory.push({"role": "user", "content": fullText || (imgToSend ? "[图片]" : "")});
+                inputField.value = ""; inputField.style.height = 'auto'; clearChatImage(); clearChatAttachments();
             }
             inputField.disabled = true; sendBtn.disabled = true;
 

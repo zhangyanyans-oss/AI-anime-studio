@@ -7,7 +7,7 @@ import uuid
 import shutil
 import asyncio
 from typing import List, Dict, Any
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, File, UploadFile
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import Response
 from pydantic import BaseModel
@@ -271,6 +271,55 @@ async def upload_image(req: UploadImageRequest):
     with open(filepath, "wb") as f:
         f.write(img_bytes)
     return {"image_url": f"/static/uploads/{filename}"}
+
+# ---------- 3.6 聊天附件解析（txt/md/pdf/docx → 纯文本，供剧本对话引用） ----------
+@app.post("/api/extract-file")
+async def extract_file(file: UploadFile = File(...)):
+    name = file.filename or "附件"
+    ext = os.path.splitext(name)[1].lower()
+    data = await file.read()
+    if len(data) > 20 * 1024 * 1024:
+        raise HTTPException(400, "文件超过 20MB，请拆分后上传")
+
+    text = ""
+    try:
+        if ext in (".txt", ".md", ".csv", ".log", ".json"):
+            for enc in ("utf-8", "gbk", "utf-16"):
+                try:
+                    text = data.decode(enc)
+                    break
+                except (UnicodeDecodeError, UnicodeError):
+                    continue
+            if not text:
+                text = data.decode("utf-8", errors="replace")
+        elif ext == ".pdf":
+            import io
+            from pypdf import PdfReader
+            reader = PdfReader(io.BytesIO(data))
+            text = "\n".join((page.extract_text() or "") for page in reader.pages)
+            if not text.strip():
+                raise HTTPException(400, "这个 PDF 提取不到文字（可能是扫描件/图片版），请换成文字版 PDF")
+        elif ext == ".docx":
+            import io
+            import docx
+            d = docx.Document(io.BytesIO(data))
+            parts = [p.text for p in d.paragraphs if p.text.strip()]
+            for t in d.tables:
+                for row in t.rows:
+                    parts.append(" | ".join(c.text.strip() for c in row.cells))
+            text = "\n".join(parts)
+        elif ext == ".doc":
+            raise HTTPException(400, "暂不支持老版 .doc，请用 Word 另存为 .docx 后上传")
+        else:
+            raise HTTPException(400, f"暂不支持 {ext or '该'} 格式，支持的附件：图片 / txt / md / csv / pdf / docx")
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, f"解析失败：{type(e).__name__}: {e}")
+
+    if not text.strip():
+        raise HTTPException(400, "文件内容为空")
+    return {"name": name, "text": text, "chars": len(text)}
 
 # ---------- 4. AutoDL 提交视频任务 ----------
 def local_url_to_data_uri(url: str) -> str:
