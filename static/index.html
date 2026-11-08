@@ -15,33 +15,48 @@
         
         .sidebar { width: 260px; background: var(--bg-panel); border-right: 1px solid var(--border-color); display: flex; flex-direction: column; z-index: 10;}
         .sidebar-header { padding: 20px; border-bottom: 1px solid var(--border-color); }
-        .btn-new { background: var(--primary); color: #fff; border: none; border-radius: 8px; padding: 10px; width: 100%; font-size: 14px; cursor: pointer; font-weight: 600; }
+        .btn-new { background: var(--primary); color: #fff; border: none; border-radius: 8px; height: 40px; width: 100%; font-size: 14px; cursor: pointer; font-weight: 600; }
         .project-list { flex: 1; overflow-y: auto; padding: 12px; }
         .project-item { padding: 12px; border-radius: 8px; cursor: pointer; margin-bottom: 6px; border: 1px solid transparent; display: flex; justify-content: space-between; align-items: center; }
         .project-item.active { background: #eff6ff; border-color: #bfdbfe; }
         .project-title { font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1; font-weight: 500;}
         .project-item.active .project-title { color: var(--primary); font-weight: 600; }
-        .btn-del-proj { background: none; border: none; color: #d1d5db; cursor: pointer; font-size: 16px; display: none; }
+        .btn-del-proj { background: none; border: none; color: #d1d5db; cursor: pointer; font-size: 16px; display: none; height: auto; padding: 0 4px; }
         .project-item:hover .btn-del-proj { display: block; }
 
         .main-content { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
         .topbar { padding: 15px 24px; background: var(--bg-panel); border-bottom: 1px solid var(--border-color); display: flex; justify-content: space-between; align-items: center; }
         .topbar input[type="text"] { background: transparent; border: 1px solid transparent; color: var(--text-main); padding: 8px 12px; border-radius: 6px; font-size: 18px; width: 300px; font-weight: 700;}
-        .btn-save { background: #ecfdf5; color: var(--success); border: 1px solid #a7f3d0; padding: 8px 16px; border-radius: 8px; cursor: pointer; font-weight: 600; }
+        .btn-save { background: #ecfdf5; color: var(--success); border: 1px solid #a7f3d0; height: 32px; padding: 0 16px; border-radius: 8px; cursor: pointer; font-weight: 600; font-size: 13px; font-family: inherit; display: inline-flex; align-items: center; }
+        .btn-save:hover { background: #d1fae5; }
         
         .workspace { padding: 24px; overflow-y: auto; flex: 1; }
         .section { background: var(--bg-panel); border-radius: 12px; padding: 24px; margin-bottom: 24px; border: 1px solid var(--border-color); box-shadow: 0 2px 8px rgba(0,0,0,0.02); }
         .section h2 { font-size: 16px; margin-bottom: 16px; font-weight: 600; display: flex; align-items: center; gap: 8px;}
         
         textarea { width: 100%; background: #f9fafb; border: 1px solid var(--border-color); border-radius: 8px; padding: 12px; font-size: 14px; resize: vertical; font-family: inherit; }
-        .prompt-edit-area { min-height: 60px; font-size: 13px; color: #4b5563; margin-top: 10px; border-style: dashed; }
+        .prompt-edit-area { width: 100%; min-height: 80px; max-height: 400px; font-size: 13px; color: #4b5563; margin-top: 10px; padding: 10px; border: 1px solid var(--border-color); border-radius: 8px; line-height: 1.6; resize: none; overflow: hidden; box-sizing: border-box; }
         
-        button { background: var(--primary); color: #fff; border: none; border-radius: 8px; padding: 10px 20px; font-size: 14px; font-weight: 600; cursor: pointer; }
+        /* ---------- 统一按钮体系：同高同盒模型、层级分明 ---------- */
+        button, a.btn-download { display: inline-flex; align-items: center; justify-content: center; gap: 4px; height: 32px; padding: 0 14px; background: var(--primary); color: #fff; border: none; border-radius: 8px; font-family: inherit; font-size: 13px; font-weight: 600; line-height: 1; cursor: pointer; white-space: nowrap; text-decoration: none; transition: filter .15s, background .15s, transform .06s; }
+        button:hover, a.btn-download:hover { filter: brightness(.93); }
+        button:active, a.btn-download:active { transform: translateY(1px); }
+        button:focus-visible, a.btn-download:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+        /* 提示词工具键：重写（强调）> AU（次要）> 中性工具 */
+        .btn-rewrite { background: linear-gradient(135deg, #3b82f6, #2563eb); box-shadow: 0 2px 6px rgba(37,99,235,.35); }
+        .btn-au { background: #eef2ff; color: #6366f1; border: 1px solid #c7d2fe; }
+        .btn-au:hover { background: #e0e7ff; filter: none; }
+        .btn-ghost { background: #fff; color: #374151; border: 1px solid var(--border-color); }
+        .btn-ghost:hover { background: #f9fafb; filter: none; }
+        .btn-sm { height: 24px; padding: 0 9px; font-size: 12px; border-radius: 6px; gap: 2px; }
         .btn-purple { background: #8b5cf6; }
         .btn-red { background: var(--danger); }
-        .btn-add { background: #ecfdf5; color: var(--success); border: 1px dashed var(--success); padding: 10px; width: 100%; margin-top: 10px;}
-        .btn-del-item { background: #fee2e2; color: var(--danger); padding: 4px 8px; font-size: 12px; border-radius: 4px; margin-left: auto; border: 1px solid #fca5a5;}
-        .btn-download { background: #e0f2fe; color: #0284c7; border: 1px solid #bae6fd; padding: 8px 16px; font-size: 13px; margin-top: 10px;}
+        .btn-add { background: #ecfdf5; color: var(--success); border: 1px dashed var(--success); height: 36px; width: 100%; margin-top: 10px; }
+        .btn-add:hover { background: #d1fae5; filter: none; }
+        .btn-del-item { background: #fee2e2; color: var(--danger); font-size: 12px; border-radius: 6px; margin-left: auto; border: 1px solid #fca5a5; }
+        .btn-del-item:hover { background: #fecaca; filter: none; }
+        .btn-download { background: #e0f2fe; color: #0284c7; border: 1px solid #bae6fd; }
+        .btn-download:hover { background: #bae6fd; filter: none; }
         
         select { background: #f9fafb; border: 1px solid var(--border-color); padding: 10px; border-radius: 8px; width: 100%; max-width: 400px; font-size: 14px; }
         
@@ -53,6 +68,8 @@
         .sortable-ghost { opacity: 0.4 !important; border: 2px dashed var(--primary) !important; }
         .drag-handle { cursor: grab; color: #9ca3af; font-size: 20px; padding-right: 8px; }
         .storyboard-row .shot-num { font-size: 20px; font-weight: 800; color: var(--primary); min-width: 36px; }
+        .sb-insert-handle { align-self: stretch; display: flex; align-items: center; justify-content: center; width: 30px; min-height: 80px; flex-shrink: 0; border-radius: 8px; color: #b6bcc7; font-size: 20px; font-weight: 700; cursor: pointer; user-select: none; border: 1px dashed transparent; transition: all .15s; }
+        .sb-insert-handle:hover { color: var(--primary); background: #eff6ff; border-color: #bfdbfe; }
         
         .hidden { display: none !important; }
         .hint { font-size: 12px; color: var(--text-muted); margin-top: 8px; display: block;}
@@ -61,16 +78,48 @@
         .label-upload { display: inline-flex; justify-content: center; background: #f3f4f6; border: 1px solid var(--border-color); padding: 10px; border-radius: 8px; cursor: pointer; }
         
         .chat-container { display: flex; flex-direction: column; gap: 16px; margin-bottom: 16px; max-height: 500px; overflow-y: auto; padding: 10px; background: #f9fafb; border-radius: 10px; border: 1px solid var(--border-color);}
+        .chat-container.collapsed { max-height: 0; padding: 0 10px; border-color: transparent; margin-bottom: 0; overflow: hidden; gap: 0; }
         .chat-bubble-wrapper { display: flex; position: relative; max-width: 85%; }
         .chat-bubble-wrapper.ai { align-self: flex-start; }
         .chat-bubble-wrapper.user { align-self: flex-end; flex-direction: row-reverse; }
         .chat-bubble { padding: 12px 16px; border-radius: 12px; line-height: 1.6; font-size: 14px; word-wrap: break-word; width: 100%; }
+        .attach-chip { font-size: 12px; opacity: 0.72; margin-top: 6px; display: inline-block; }
         .chat-ai { background: #fff; border-bottom-left-radius: 4px; border: 1px solid var(--border-color);}
         .chat-user { background: var(--primary); color: #fff; border-bottom-right-radius: 4px; }
         .chat-input-row { display: flex; gap: 10px; align-items: flex-end;}
+        .chat-input-row button { height: 44px; padding: 0 18px; font-size: 14px; }
         .chat-input-row textarea { flex: 1; padding: 12px; font-size: 14px; min-height: 44px; max-height: 120px; }
         @keyframes genSlide { from { margin-left: -40%; } to { margin-left: 100%; } }
         .gen-loading-bar { width: 40%; height: 100%; background: var(--primary); border-radius: 9999px; animation: genSlide 1.2s ease-in-out infinite; }
+
+        /* ---------- 侧栏标签页与风格库 ---------- */
+        .side-tabs { display: flex; gap: 6px; padding: 10px 12px; border-bottom: 1px solid var(--border-color); }
+        .side-tab { flex: 1; height: 36px; padding: 0; background: #f3f4f6; color: #374151; font-size: 13px; }
+        .side-tab:hover { background: #e5e7eb; filter: none; }
+        .side-tab.active { background: var(--primary); color: #fff; }
+        .side-view { padding: 24px; overflow-y: auto; flex: 1; }
+        .side-view-inner { max-width: 1080px; margin: 0 auto; }
+        /* 设置为覆盖主区域的固定面板（侧栏标签仍可见可点） */
+        #settingsModal { position: fixed; top: 0; left: 260px; right: 0; bottom: 0; background: var(--bg-main); z-index: 400; overflow-y: auto; padding: 24px; display: none; }
+        #settingsModal:not(.hidden) { display: block; }
+        .style-chips { display: flex; gap: 8px; flex-wrap: wrap; margin: 14px 0 18px; }
+        .style-chip { height: 30px; padding: 0 14px; border-radius: 9999px; background: #fff; color: #374151; border: 1px solid var(--border-color); font-size: 13px; }
+        .style-chip:hover { background: #f3f4f6; filter: none; }
+        .style-chip.active { background: #111827; color: #fff; border-color: #111827; }
+        .style-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 12px; }
+        .style-card { background: #fff; border: 1px solid var(--border-color); border-radius: 12px; overflow: hidden; cursor: pointer; transition: transform .12s, box-shadow .12s; }
+        .style-card:hover { transform: translateY(-2px); box-shadow: 0 8px 20px rgba(0,0,0,.08); }
+        .style-thumb { height: 88px; display: flex; align-items: center; justify-content: center; font-size: 36px; position: relative; overflow: hidden; }
+        .style-thumb img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+        .style-card-name { padding: 8px 10px 2px; font-size: 13px; font-weight: 600; color: var(--text-main); }
+        .style-card-desc { padding: 2px 10px 10px; font-size: 11px; color: var(--text-muted); line-height: 1.5; }
+        .style-card.copied { outline: 2px solid var(--success); }
+
+        /* 点击图片查看大图（灯箱） */
+        #lightbox { position: fixed; inset: 0; background: rgba(0,0,0,.82); display: none; align-items: center; justify-content: center; z-index: 9999; cursor: zoom-out; }
+        #lightbox.show { display: flex; }
+        #lightbox img { max-width: 92vw; max-height: 92vh; border-radius: 10px; box-shadow: 0 8px 40px rgba(0,0,0,.5); }
+        img.clickable-img { cursor: zoom-in; }
     </style>
 </head>
 <body>
@@ -79,15 +128,23 @@
             <h1>🎬 动画工作台</h1>
             <button class="btn-new" onclick="createNewProject()">+ 新建项目</button>
         </div>
+        <div class="side-tabs">
+            <button class="side-tab active" id="tab-create" onclick="showTab('create')">✏️ 创作</button>
+            <button class="side-tab" id="tab-gallery" onclick="showTab('gallery')">🖼️ 风格库</button>
+            <button class="side-tab" id="tab-settings" onclick="showTab('settings')">⚙️ 设置</button>
+        </div>
         <div class="project-list" id="projectList"></div>
     </div>
 
     <div class="main-content">
-        <div class="topbar">
+        <div id="configBanner" style="display:none; background:#fef2f2; border:1px solid #fecaca; color:#b91c1c; padding:10px 20px; font-size:14px; border-radius:8px; margin:10px 20px 0; line-height:1.6;"></div>
+        <div class="topbar" id="topbar">
             <input type="text" id="projectNameInput" placeholder="未命名项目" onchange="saveCurrentProject()">
             <div style="display:flex; gap:10px;">
-                <button onclick="openSettings()">⚙️ API 设置</button>
                 <button class="btn-save" onclick="saveCurrentProject(true)">💾 保存当前进度</button>
+                <button class="btn-save" onclick="exportProject()" title="把当前项目的剧本、对话、提示词和引用的图片/视频打包成一个 .aianime.zip 文件，可拷到别的电脑导入">📤 导出</button>
+                <button class="btn-save" onclick="document.getElementById('importProjectInput').click()" title="导入一个 .aianime.zip 项目包，作为新项目加入列表">📥 导入</button>
+                <input type="file" id="importProjectInput" accept=".zip" style="display:none;" onchange="importProjectFile(event)">
             </div>
         </div>
 
@@ -130,6 +187,7 @@
                         </optgroup>
                     </select>
                     <input type="text" id="i2vWorkflowInput" class="hidden" value="minimax_h3_lightx2v" placeholder="输入工作流 ID" style="width: 220px;" onchange="saveCurrentProject()">
+                    <label style="cursor: pointer; white-space: nowrap; font-size: 14px; display:flex; align-items:center; gap:4px;" title="视频时长（秒），1-15；不同工作流支持的档位不同，超范围会被平台拒绝">⏱️ <input type="number" id="videoDurationInput" min="1" max="15" value="5" style="width: 58px; padding: 4px 6px;" onchange="onDurationChange()"> 秒</label>
                 </div>
                 <div class="hint" id="videoModeHint" style="margin-top: 6px;">AI 参考分镜图"自由发挥"演一段：角色长相、服装、场景会跟着参考图走，但动作大、构图和画风可能变化。适合需要明显动态的镜头。</div>
                 <div class="hint hidden" id="i2vHint" style="margin-top: 6px;">分镜图作为视频的起始帧（首帧）或结束帧（尾帧）原样出现，一致性最高。可在下拉里切换首尾帧工作流，或选"自定义"手动填 ID。</div>
@@ -140,7 +198,7 @@
                 <textarea id="ideaInput" placeholder="输入文字或传图..." oninput="saveCurrentProject()"></textarea>
                 <div id="mainImagePreviewArea" class="input-attachment hidden">
                     <img id="mainPreviewImg" src="">
-                    <button onclick="clearMainImage()" style="background:var(--danger); padding:6px; font-size:12px;">取消</button>
+                    <button class="btn-sm btn-red" onclick="clearMainImage()">取消</button>
                 </div>
                 <div style="display: flex; gap: 12px; margin-top: 12px; flex-wrap: wrap;">
                     <button id="generateStoryBtn" onclick="generateStory()">生成 剧情/分镜</button>
@@ -153,9 +211,12 @@
             </div>
 
             <div id="brainstormSection" class="section hidden">
-                <div style="display:flex; justify-content:space-between; margin-bottom:16px;">
-                    <h2>💡 头脑风暴</h2>
-                    <button class="btn-clear" style="background:#f3f4f6; color:#333; padding: 6px 12px;" onclick="clearAllChat()">🧹 清空</button>
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
+                    <h2 style="margin:0;">💡 头脑风暴</h2>
+                    <div style="display:flex; gap:8px; align-items:center;">
+                        <button id="chatCollapseBtn" class="btn-sm btn-ghost" onclick="toggleChatCollapse()">🔼 收起对话</button>
+                        <button class="btn-sm btn-ghost" onclick="clearAllChat()">🧹 清空</button>
+                    </div>
                 </div>
                 <div id="chatContainer" class="chat-container"></div>
                 <div id="chatImagePreviewArea" class="input-attachment hidden"></div>
@@ -173,7 +234,10 @@
                 <h2 style="margin-top:20px;">剧情梗概</h2>
                 <div id="synopsisText" class="value" style="line-height: 1.8;"></div>
                 <div id="chatContextWrapper" class="hidden" style="margin-top:20px;">
-                    <h2>对话上下文</h2>
+                    <div style="display:flex; justify-content:space-between; align-items:center;">
+                        <h2 style="margin:0;">对话上下文</h2>
+                        <button id="ctxCollapseBtn" class="btn-sm btn-ghost" onclick="toggleContextCollapse()">🔼 收起</button>
+                    </div>
                     <div id="chatContextBox" style="background:#f9fafb; padding:16px; border-radius:8px; border:1px solid var(--border-color); font-size:13px; line-height:1.6;"></div>
                 </div>
             </div>
@@ -225,22 +289,27 @@
 
             <div id="videoSection" class="section hidden">
                 <h2>视频生成</h2>
-                <label style="display:flex; align-items:center; gap:8px; font-size:13px; color:#4b5563; margin-bottom:12px; cursor:pointer;">
-                    <input type="checkbox" id="strictRefCheck" checked>
-                    严格保持参考图的角色外貌、服装配饰与场景一致（减少运动重绘导致的造型变化）
-                </label>
                 <div id="videoPreview" class="video-preview"></div>
                 <div id="videoLog" class="hint"></div>
                 <h2 style="margin-top:24px;">📁 已保存的视频 <span class="hint" style="display:inline; font-weight:normal;">(自动保存到本地，永久有效)</span></h2>
                 <div id="videoGallery"></div>
             </div>
         </div>
+
+        <!-- 风格参考图库标签页 -->
+        <div id="viewGallery" class="side-view hidden">
+            <div class="side-view-inner">
+                <h2 style="margin-bottom:4px;">🖼️ 风格参考图库</h2>
+                <div class="hint" style="display:block;">仅供浏览参考：喜欢某种风格就点卡片复制描述，粘贴到"画风圣经"或分镜提示词里即可套用。样图来自 Wikimedia Commons（公有领域/CC 授权），仅示意风格方向。</div>
+                <div id="styleChips" class="style-chips"></div>
+                <div id="styleGrid" class="style-grid"></div>
+            </div>
+        </div>
     </div>
 
-    <!-- API 设置弹窗 -->
-    <div id="settingsModal" class="hidden" onclick="if(event.target===this) closeSettings()"
-         style="position:fixed; inset:0; background:rgba(15,23,42,0.5); z-index:500; display:flex; align-items:center; justify-content:center;">
-        <div style="background:var(--bg-panel); border-radius:14px; padding:24px; width:560px; max-width:92vw; max-height:88vh; overflow-y:auto; box-shadow:0 20px 60px rgba(0,0,0,0.25);">
+    <!-- 设置标签页（覆盖主区域，侧栏标签仍可点击切换） -->
+    <div id="settingsModal" class="hidden">
+        <div class="side-view-inner" style="max-width:720px;">
             <h2 style="margin-top:0;">⚙️ API 设置</h2>
             <div class="hint" style="margin-bottom:14px;">修改后立即生效并写入 .env，重启后依然有效。<b>API Key 输入框留空 = 保持现有 Key 不变</b>（出于安全，Key 不在页面明文显示）。</div>
 
@@ -267,8 +336,8 @@
             <input type="text" id="setAutodlBase" style="width:100%; margin-bottom:14px; padding:8px;">
 
             <div style="display:flex; gap:10px; align-items:center;">
-                <button onclick="saveSettings()" style="background:var(--primary); color:#fff;">保存设置</button>
-                <button onclick="closeSettings()" style="background:#f3f4f6; color:#333;">关闭</button>
+                <button onclick="saveSettings()">保存设置</button>
+                <button class="btn-ghost" onclick="closeSettings()">返回创作</button>
                 <span id="settingsMsg" class="hint" style="display:inline;"></span>
             </div>
         </div>
@@ -300,6 +369,7 @@
             currentData.name = document.getElementById("projectNameInput").value || "未命名项目";
             currentData.workflowId = getSelectedWorkflowId();
             currentData.videoMode = getVideoMode();
+            currentData.videoDuration = getVideoDuration();
             currentData.imageAspect = document.getElementById("aspectSelect").value;
             currentData.charAspect = document.getElementById("charAspectSelect").value;
             currentData.sceneAspect = document.getElementById("sceneAspectSelect").value;
@@ -350,6 +420,7 @@
             document.getElementById("sceneAspectSelect").value = currentData.sceneAspect || "portrait";
             const modeRadio = document.querySelector(`input[name="videoMode"][value="${currentData.videoMode || "reference"}"]`);
             if (modeRadio) modeRadio.checked = true;
+            if (currentData.videoDuration) document.getElementById("videoDurationInput").value = currentData.videoDuration;
             onVideoModeChange();
             document.getElementById("ideaInput").value = currentData.idea;
             document.getElementById("chatContainer").innerHTML = "";
@@ -397,6 +468,26 @@
             }
             renderProjectList();
             loadVideoGallery();
+            checkConfigOnLoad();
+        }
+
+        // 页面加载时检查 API 配置是否齐全，缺就挂醒目横幅（方便在别人电脑上排障）
+        async function checkConfigOnLoad() {
+            try {
+                const resp = await fetch(`${API}/api/settings`);
+                if (!resp.ok) return;
+                const d = await resp.json();
+                const missing = [];
+                if (!d.deepseek_api_key) missing.push("<b>DeepSeek API Key</b>（写剧本/头脑风暴必需）");
+                if (!d.ark_api_key) missing.push("<b>火山引擎 ARK Key</b>（生成分镜图/角色/场景图必需）");
+                if (!d.autodl_token) missing.push("<b>AutoDL Token</b>（生成视频必需）");
+                if (missing.length) {
+                    const banner = document.getElementById("configBanner");
+                    banner.innerHTML = "⚠️ 首次使用请先完成配置：本机未检测到 " + missing.join("、") +
+                        "。点击左侧 <b>⚙️ 设置</b> 标签页直接粘贴 Key 并保存；或在本程序同目录创建 .env 文件填入对应 Key 后重启程序。";
+                    banner.style.display = "block";
+                }
+            } catch (e) { /* 忽略 */ }
         }
 
         function createNewProject() {
@@ -406,6 +497,63 @@
             localStorage.setItem("ai_studio_projects", JSON.stringify(projects));
             loadProject(newId);
             renderProjectList();
+        }
+
+        // ===== 项目导出/导入：打包当前项目 JSON + 引用的图片视频为 zip，可跨电脑迁移 =====
+        async function exportProject() {
+            const btn = event && event.target ? event.target : null;
+            if (btn) { btn.disabled = true; btn.textContent = "⏳ 打包中…"; }
+            try {
+                saveCurrentProject();
+                const resp = await fetch(`${API}/api/export-project`, {
+                    method: "POST", headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ name: currentData.name || "未命名项目", data: currentData }),
+                });
+                if (!resp.ok) {
+                    let detail = `HTTP ${resp.status}`;
+                    try { const j = await resp.json(); detail = j.detail || detail; } catch (_) {}
+                    throw new Error(detail);
+                }
+                const blob = await resp.blob();
+                let fname = "项目导出.aianime.zip";
+                const m = (resp.headers.get("Content-Disposition") || "").match(/filename\*=UTF-8''([^;]+)/);
+                if (m) { try { fname = decodeURIComponent(m[1]); } catch (_) {} }
+                const a = document.createElement("a");
+                a.href = URL.createObjectURL(blob);
+                a.download = fname;
+                document.body.appendChild(a); a.click(); a.remove();
+                URL.revokeObjectURL(a.href);
+            } catch (e) { alert("导出失败：" + e.message); }
+            finally { if (btn) { btn.disabled = false; btn.textContent = "📤 导出"; } }
+        }
+
+        async function importProjectFile(event) {
+            const file = event.target.files[0]; if (!file) return;
+            if (!/\.zip$/i.test(file.name)) { alert("请选择导出的 .aianime.zip 文件"); event.target.value = ""; return; }
+            if (!confirm(`导入项目包「${file.name}」？\n将作为新项目加入列表，不会覆盖现有项目。`)) { event.target.value = ""; return; }
+            try {
+                const fd = new FormData();
+                fd.append("file", file);
+                const resp = await fetch(`${API}/api/import-project`, { method: "POST", body: fd });
+                if (!resp.ok) {
+                    let detail = `HTTP ${resp.status}`;
+                    try { const j = await resp.json(); detail = j.detail || detail; } catch (_) {}
+                    throw new Error(detail);
+                }
+                const j = await resp.json();
+                const proj = j.project || {};
+                const newId = Date.now().toString();
+                proj.id = newId;
+                if (!Array.isArray(proj.chatHistory)) proj.chatHistory = [];
+                if (!proj.images) proj.images = {};
+                projects.push(proj);
+                localStorage.setItem("ai_studio_projects", JSON.stringify(projects));
+                renderProjectList();
+                loadProject(newId);
+                const n = j.restored_files || 0;
+                alert(`导入成功！随包恢复了 ${n} 个图片/视频文件。`);
+            } catch (e) { alert("导入失败：" + e.message); }
+            finally { event.target.value = ""; }
         }
 
         function deleteProject(e, id) {
@@ -486,9 +634,9 @@
         }
         function renderChatAttachments() {
             const area = document.getElementById("chatImagePreviewArea");
-            const imgHtml = chatImageBase64 ? `<img src="data:image/jpeg;base64,${chatImageBase64}" height="60" style="border-radius:6px;"> <button onclick="clearChatImage()">取消</button>` : "";
+            const imgHtml = chatImageBase64 ? `<img src="data:image/jpeg;base64,${chatImageBase64}" height="60" style="border-radius:6px;"> <button class="btn-sm btn-ghost" onclick="clearChatImage()">取消</button>` : "";
             const docHtml = chatAttachments.map((a, i) =>
-                `<span style="background:#eef2ff; border:1px solid #c7d2fe; color:#3730a3; padding:6px 10px; border-radius:8px; font-size:12px; display:inline-flex; align-items:center; gap:6px;">📄 ${a.name}（${a.text.length}字） <button onclick="removeChatAttachment(${i})" title="移除附件" style="padding:0 6px;">✕</button></span>`
+                `<span style="background:#eef2ff; border:1px solid #c7d2fe; color:#3730a3; padding:6px 10px; border-radius:8px; font-size:12px; display:inline-flex; align-items:center; gap:6px;">📄 ${a.name}（${a.text.length}字） <button class="btn-sm btn-ghost" onclick="removeChatAttachment(${i})" title="移除附件">✕</button></span>`
             ).join("");
             area.innerHTML = imgHtml + docHtml;
             area.classList.toggle("hidden", !(imgHtml + docHtml).trim());
@@ -512,7 +660,7 @@
                         const base64Str = event.target.result;
                         if (!document.getElementById("brainstormSection").classList.contains("hidden")) {
                             chatImageBase64 = base64Str.split(',')[1];
-                            document.getElementById("chatImagePreviewArea").innerHTML = `<img src="${base64Str}" height="60" style="border-radius:6px;"> <button onclick="clearChatImage()">取消</button>`;
+                            document.getElementById("chatImagePreviewArea").innerHTML = `<img src="${base64Str}" height="60" style="border-radius:6px;"> <button class="btn-sm btn-ghost" onclick="clearChatImage()">取消</button>`;
                             document.getElementById("chatImagePreviewArea").classList.remove("hidden");
                         } else {
                             mainImageBase64 = base64Str.split(',')[1];
@@ -539,31 +687,69 @@
             if (!confirm("清空对话并重新开始？")) return;
             currentData.chatHistory = [];
             document.getElementById("chatContainer").innerHTML = "";
-            clearChatImage(); saveCurrentProject(); sendChatMessage("", true); 
+            clearChatImage(); saveCurrentProject(); sendChatMessage("", true);
+        }
+
+        // 收起/展开 AI 对话记录区（输入框保持可用）
+        function toggleChatCollapse() {
+            const box = document.getElementById("chatContainer");
+            const btn = document.getElementById("chatCollapseBtn");
+            const collapsed = box.classList.toggle("collapsed");
+            btn.textContent = collapsed ? "🔽 展开对话" : "🔼 收起对话";
+            if (!collapsed) box.scrollTop = box.scrollHeight; // 展开时跳到最新消息
+        }
+
+        // 收起/展开剧本页的"对话上下文"区块
+        function toggleContextCollapse() {
+            const box = document.getElementById("chatContextBox");
+            const btn = document.getElementById("ctxCollapseBtn");
+            const collapsed = box.classList.toggle("hidden");
+            btn.textContent = collapsed ? "🔽 展开" : "🔼 收起";
         }
 
         function collapseAttachments(t) {
-            // 历史消息里可能带整段附件文本，气泡里折叠成一行标签（完整内容仍在上下文中）
-            return (t || "").replace(/📎【附件·(.+?)】\n[\s\S]*?(?=\n?📎【附件·|$)/g, (m, n) => `📎 附件「${n}」（内容已注入上下文）`);
+            // 历史消息里可能带整段附件文本，展示时整段剔除（完整内容仍保存在上下文/存储中）
+            return (t || "").replace(/📎【附件·(.+?)】\n[\s\S]*?(?=\n?📎【附件·|$)/g, "").trim();
+        }
+        function countAttachments(t) {
+            return ((t || "").match(/📎【附件·/g) || []).length;
+        }
+        function attachChipFromContent(content) {
+            // 从存储的消息内容推断附件标记（图片占位 [图片] / 附件全文块）
+            const parts = [];
+            if (/\[图片\]/.test(content || "")) parts.push("🖼️ 附带图片");
+            const n = countAttachments(content);
+            if (n) parts.push(`📄 附件 ×${n}`);
+            return parts.join("　");
         }
 
-        function appendChatBubble(role, text, imgBase64 = null, saveToHistory = true) {
+        function appendChatBubble(role, text, imgBase64 = null, saveToHistory = true, attachChip = null) {
             const container = document.getElementById("chatContainer");
             const wrapper = document.createElement("div");
             wrapper.className = `chat-bubble-wrapper ${role === 'ai' ? 'ai' : 'user'}`;
             const bubble = document.createElement("div");
             bubble.className = `chat-bubble ${role === 'ai' ? 'chat-ai' : 'chat-user'}`;
 
-            const textNode = document.createElement("div");
-            const displayText = collapseAttachments(text);
-            if (role === 'ai') textNode.innerHTML = renderMarkdown(displayText);
-            else textNode.textContent = displayText;
-            bubble.appendChild(textNode);
-
-            if (imgBase64) {
-                const img = document.createElement("img");
-                img.src = `data:image/jpeg;base64,${imgBase64}`;
-                bubble.appendChild(img);
+            // 附件（图片/文档）不渲染进对话历史，只显示弱化小标签；附件全文仅存于上下文
+            const displayText = collapseAttachments(text).replace(/\[图片\]/g, "").trim();
+            if (displayText) {
+                const textNode = document.createElement("div");
+                if (role === 'ai') textNode.innerHTML = renderMarkdown(displayText);
+                else textNode.textContent = displayText;
+                bubble.appendChild(textNode);
+            }
+            const chipText = attachChip !== null ? attachChip : attachChipFromContent(text);
+            if (chipText) {
+                const chip = document.createElement("div");
+                chip.className = "attach-chip";
+                chip.textContent = chipText;
+                bubble.appendChild(chip);
+            }
+            if (!displayText && !chipText) {
+                const emptyNode = document.createElement("div");
+                emptyNode.style.opacity = "0.6";
+                emptyNode.textContent = "（空消息）";
+                bubble.appendChild(emptyNode);
             }
 
             const deleteBtn = document.createElement("button");
@@ -586,8 +772,10 @@
 
             const imgToSend = chatImageBase64;
             if (!isInit) {
-                const bubbleText = (text || "") + chatAttachments.map(a => `\n📎 ${a.name}`).join("");
-                appendChatBubble('user', bubbleText, imgToSend);
+                const chipParts = [];
+                if (imgToSend) chipParts.push("🖼️ 附带图片");
+                if (chatAttachments.length) chipParts.push(`📄 附件 ×${chatAttachments.length}`);
+                appendChatBubble('user', text, null, true, chipParts.join("　"));
                 currentData.chatHistory.push({"role": "user", "content": fullText || (imgToSend ? "[图片]" : "")});
                 inputField.value = ""; inputField.style.height = 'auto'; clearChatImage(); clearChatAttachments();
             }
@@ -598,7 +786,11 @@
                     method: "POST", headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({ step: currentData.chatHistory.length, messages: currentData.chatHistory, user_input: text, image_base64: imgToSend }),
                 });
-                if (!resp.ok) throw new Error("网络错误");
+                if (!resp.ok) {
+                    let detail = `HTTP ${resp.status}`;
+                    try { const j = await resp.json(); detail = j.detail || detail; } catch (_) {}
+                    throw new Error(detail);
+                }
                 const data = await resp.json();
                 appendChatBubble('ai', data.reply);
                 currentData.chatHistory.push({"role": "assistant", "content": data.reply});
@@ -666,7 +858,6 @@
             } else if (type === 'scene') {
                 // 场景参考图也参考已生成的角色图：人物长相、服装、画风保持一致
                 (currentData.storyData.characters || []).forEach((c, i) => addRef(c.imgSrc || currentData.images[`char-${i}`], "character", c.name, c.description));
-                if (referenceUrls.length) prompt += "。画面中若出现参考图里的角色，其长相、发型、服装配饰必须与参考图完全一致；整体画风、色调、光影必须与参考图保持同一部作品的风格统一";
             }
 
             // 生图进度条：动画条 + 已等待秒数
@@ -802,6 +993,84 @@
                 el.style.color = "var(--danger)";
             }
         }
+        // ---------- 侧栏标签页切换 ----------
+        function showTab(name) {
+            document.getElementById("workspace").classList.toggle("hidden", name !== "create");
+            document.getElementById("topbar").classList.toggle("hidden", name !== "create");
+            document.getElementById("viewGallery").classList.toggle("hidden", name !== "gallery");
+            document.getElementById("settingsModal").classList.toggle("hidden", name !== "settings");
+            ["create", "gallery", "settings"].forEach(t => {
+                const el = document.getElementById("tab-" + t);
+                if (el) el.classList.toggle("active", t === name);
+            });
+            if (name === "gallery") renderStyleGallery();
+        }
+
+        // ---------- 风格参考图库（仅浏览参考，点击卡片复制风格描述） ----------
+        const STYLE_PRESETS = [
+            { cat: "3D", name: "无风格（直出）", emoji: "🚫", bg: "linear-gradient(135deg,#e5e7eb,#9ca3af)", img: "style-previews/neutral.jpg", desc: "不施加风格倾向，按提示词原始描述直接生成" },
+            { cat: "3D", name: "3D卡通渲染", emoji: "🧸", bg: "linear-gradient(135deg,#fbbf24,#f59e0b)", img: "style-previews/3d_cartoon.jpg", desc: "皮克斯式3D卡通渲染，圆润造型，柔和的次表面散射，明亮饱和的色块" },
+            { cat: "3D", name: "电影级3D质感", emoji: "🎬", bg: "linear-gradient(135deg,#94a3b8,#334155)", img: "style-previews/cinematic_3d.jpg", desc: "写实电影级3D渲染，物理光照，浅景深，电影感构图" },
+            { cat: "3D", name: "国风3D动画", emoji: "🏮", bg: "linear-gradient(135deg,#fca5a5,#b91c1c)", img: "style-previews/guofeng_3d.jpg", desc: "国产3D古风动画质感，敦煌配色，飘逸绸缎与仙侠气韵" },
+            { cat: "3D", name: "黏土定格", emoji: "🧱", bg: "linear-gradient(135deg,#fda4af,#e11d48)", img: "style-previews/clay.jpg", desc: "黏土定格动画质感，保留手工捏痕，微缩摄影棚布光" },
+            { cat: "3D", name: "3D厚涂插画", emoji: "🖌️", bg: "linear-gradient(135deg,#a78bfa,#6d28d9)", img: "style-previews/3d_thickpaint.jpg", desc: "3D厚涂质感，立体光影与手绘笔触结合，画面厚重" },
+            { cat: "3D", name: "毛毡布艺", emoji: "🧶", bg: "linear-gradient(135deg,#fdba74,#ea580c)", img: "style-previews/felt.jpg", desc: "羊毛毡质感，纤维细节可见，柔和的手工温度" },
+            { cat: "动漫", name: "日式赛璐璐", emoji: "📺", bg: "linear-gradient(135deg,#f9a8d4,#db2777)", img: "style-previews/cel_anime.jpg", desc: "经典赛璐璐平涂，清晰线稿，色块分明的二分光影" },
+            { cat: "动漫", name: "吉卜力手绘", emoji: "🌿", bg: "linear-gradient(135deg,#86efac,#16a34a)", img: "style-previews/ghibli.jpg", desc: "吉卜力式水彩背景，温暖自然光，细腻的空气感与生活气息" },
+            { cat: "动漫", name: "新海诚光影", emoji: "🌇", bg: "linear-gradient(135deg,#f0abfc,#9333ea)", img: "style-previews/shinkai.jpg", desc: "新海诚式绚烂天空，超饱和晚霞与逆光，都市青春物语" },
+            { cat: "动漫", name: "90年代复古日漫", emoji: "📼", bg: "linear-gradient(135deg,#fcd34d,#b45309)", img: "style-previews/retro_anime.jpg", desc: "90年代赛璐璐质感，胶片颗粒，复古高饱和配色" },
+            { cat: "动漫", name: "二次元厚涂", emoji: "⚔️", bg: "linear-gradient(135deg,#818cf8,#4338ca)", img: "style-previews/thick_anime.jpg", desc: "二次元厚涂插画，精致五官刻画，丰富的色彩层次" },
+            { cat: "动漫", name: "美式漫画", emoji: "💥", bg: "linear-gradient(135deg,#f87171,#b91c1c)", img: "style-previews/us_comic.jpg", desc: "美式漫画风，粗黑描边，网点阴影，强烈的动感构图" },
+            { cat: "动漫", name: "少女漫画", emoji: "🌸", bg: "linear-gradient(135deg,#fbcfe8,#f472b6)", img: "style-previews/shoujo.jpg", desc: "少女漫画，柔和粉彩，网点与花瓣装饰，唯美氛围" },
+            { cat: "动漫", name: "暗黑日漫", emoji: "🌑", bg: "linear-gradient(135deg,#64748b,#0f172a)", img: "style-previews/dark_anime.jpg", desc: "暗黑系日漫，强对比阴影，哥特式氛围" },
+            { cat: "国风", name: "水墨写意", emoji: "🖤", bg: "linear-gradient(135deg,#d1d5db,#374151)", img: "style-previews/ink_wash.jpg", desc: "水墨晕染，大量留白，毛笔笔触，意境深远" },
+            { cat: "国风", name: "青绿山水", emoji: "⛰️", bg: "linear-gradient(135deg,#6ee7b7,#047857)", img: "style-previews/blue_green.jpg", desc: "千里江山图式青绿设色，绢本底色，古典山水构图" },
+            { cat: "国风", name: "工笔重彩", emoji: "🪭", bg: "linear-gradient(135deg,#fef3c7,#b45309)", img: "style-previews/gongbi.jpg", desc: "工笔重彩，匀细游丝描，矿物颜料质感" },
+            { cat: "国风", name: "敦煌壁画", emoji: "🕌", bg: "linear-gradient(135deg,#fbbf24,#92400e)", img: "style-previews/dunhuang.jpg", desc: "敦煌壁画质感，斑驳墙面，飞天线描，土黄与石绿" },
+            { cat: "国风", name: "剪纸皮影", emoji: "🎭", bg: "linear-gradient(135deg,#ef4444,#7f1d1d)", img: "style-previews/papercut.jpg", desc: "剪纸皮影风格，平面镂空，红黑对比，民间艺术质感" },
+            { cat: "国风", name: "青花瓷韵", emoji: "🏺", bg: "linear-gradient(135deg,#93c5fd,#1e40af)", img: "style-previews/bluewhite.jpg", desc: "青花瓷配色，缠枝纹样，白底蓝彩的东方雅致" },
+            { cat: "影视", name: "电影胶片", emoji: "🎞️", bg: "linear-gradient(135deg,#6b7280,#111827)", img: "style-previews/film35.jpg", desc: "35mm胶片颗粒，宽画幅，柯达暖调，电影级调色" },
+            { cat: "影视", name: "赛博朋克", emoji: "🌃", bg: "linear-gradient(135deg,#22d3ee,#7c3aed)", img: "style-previews/cyberpunk.jpg", desc: "赛博朋克，霓虹雨夜，全息广告，青紫高对比" },
+            { cat: "影视", name: "末日废土", emoji: "☢️", bg: "linear-gradient(135deg,#d6d3d1,#57534e)", img: "style-previews/wasteland.jpg", desc: "废土美学，沙尘色温，残破建筑与锈蚀金属" },
+            { cat: "影视", name: "黑色电影", emoji: "🕶️", bg: "linear-gradient(135deg,#9ca3af,#1f2937)", img: "style-previews/noir.jpg", desc: "Film Noir，高对比黑白，百叶窗光影，悬疑氛围" },
+            { cat: "影视", name: "冰雪末世", emoji: "❄️", bg: "linear-gradient(135deg,#bae6fd,#0369a1)", img: "style-previews/ice.jpg", desc: "冰雪末世，冷蓝低饱和，雾气与冰晶颗粒" },
+            { cat: "影视", name: "蒸汽波", emoji: "🌴", bg: "linear-gradient(135deg,#f472b6,#06b6d4)", img: "style-previews/vaporwave.jpg", desc: "蒸汽波美学，粉紫渐变，复古电脑图形与雕像元素" },
+            { cat: "影视", name: "暗黑恐怖", emoji: "🕯️", bg: "linear-gradient(135deg,#525252,#0a0a0a)", img: "style-previews/horror.jpg", desc: "暗黑恐怖，单光源烛光，浓重阴影，低明度" },
+            { cat: "影视", name: "温暖生活剧", emoji: "🏠", bg: "linear-gradient(135deg,#fdba74,#c2410c)", img: "style-previews/family_warm.jpg", desc: "温暖生活剧质感，柔光，暖黄室内色调" },
+            { cat: "艺术", name: "梵高油画", emoji: "🌻", bg: "linear-gradient(135deg,#fde047,#c2410c)", img: "style-previews/vangogh.jpg", desc: "梵高式厚涂油画，流动的短笔触，浓烈奔放的色彩" },
+            { cat: "艺术", name: "水彩绘本", emoji: "🖍️", bg: "linear-gradient(135deg,#a5f3fc,#0e7490)", img: "style-previews/watercolor_kids.jpg", desc: "儿童绘本水彩，柔和边缘，纸张纹理，天真视角" },
+            { cat: "艺术", name: "扁平插画", emoji: "🔷", bg: "linear-gradient(135deg,#93c5fd,#1d4ed8)", img: "style-previews/flat.jpg", desc: "扁平矢量插画，几何色块，无描边，现代简洁" },
+            { cat: "艺术", name: "像素艺术", emoji: "👾", bg: "linear-gradient(135deg,#a3e635,#3f6212)", img: "style-previews/pixel.jpg", desc: "像素艺术，有限调色板，16-bit复古游戏感" },
+            { cat: "艺术", name: "浮世绘", emoji: "🌊", bg: "linear-gradient(135deg,#fef9c3,#0e7490)", img: "style-previews/ukiyo.jpg", desc: "浮世绘木刻，平涂色块，波浪与云纹图式" },
+            { cat: "艺术", name: "极简线条", emoji: "✏️", bg: "linear-gradient(135deg,#f3f4f6,#4b5563)", img: "style-previews/line_min.jpg", desc: "极简单线插画，大量留白，一根线条讲完故事" },
+            { cat: "艺术", name: "暗黑哥特", emoji: "🦇", bg: "linear-gradient(135deg,#7c3aed,#18181b)", img: "style-previews/gothic.jpg", desc: "哥特式暗黑华丽，尖拱与蕾丝，抑郁而优雅" },
+            { cat: "艺术", name: "复古印刷", emoji: "📰", bg: "linear-gradient(135deg,#fdba74,#9a3412)", img: "style-previews/retro_print.jpg", desc: "复古印刷海报，错版套色，粗糙纸纹" },
+        ];
+        let styleCat = "全部";
+        // 配图版本号：换图后改这个值，避免浏览器拿旧图缓存（文件名不变）
+        const STYLE_IMG_VER = "2";
+        function renderStyleGallery() {
+            const cats = ["全部", ...new Set(STYLE_PRESETS.map(p => p.cat))];
+            document.getElementById("styleChips").innerHTML = cats.map(c =>
+                `<button class="style-chip ${c === styleCat ? "active" : ""}" onclick="setStyleCat('${c}')">${c}</button>`).join("");
+            const list = STYLE_PRESETS.filter(p => styleCat === "全部" || p.cat === styleCat);
+            document.getElementById("styleGrid").innerHTML = list.map(p =>
+                `<div class="style-card" onclick="copyStyleDesc(this, '${p.name}')" title="点击复制风格描述">
+                    <div class="style-thumb" style="background:${p.bg}"><span>${p.emoji}</span><img src="${p.img}?v=${STYLE_IMG_VER}" loading="lazy" alt="${p.name}" onerror="this.remove()"></div>
+                    <div class="style-card-name">${p.name}</div>
+                    <div class="style-card-desc">${p.desc}</div>
+                </div>`).join("");
+        }
+        function setStyleCat(c) { styleCat = c; renderStyleGallery(); }
+        function copyStyleDesc(card, name) {
+            const p = STYLE_PRESETS.find(x => x.name === name);
+            if (!p) return;
+            navigator.clipboard.writeText(p.desc).then(() => {
+                card.classList.add("copied");
+                setTimeout(() => card.classList.remove("copied"), 800);
+            }).catch(() => {});
+        }
+
         async function openSettings() {
             document.getElementById("settingsMsg").textContent = "";
             try {
@@ -823,10 +1092,10 @@
                     document.getElementById("setAutodlBase").value = d.autodl_base || "";
                 }
             } catch (e) { /* 打开时读不到就留空 */ }
-            document.getElementById("settingsModal").classList.remove("hidden");
+            showTab("settings");
         }
         function closeSettings() {
-            document.getElementById("settingsModal").classList.add("hidden");
+            showTab("create");
         }
         async function saveSettings() {
             const msg = document.getElementById("settingsMsg");
@@ -850,6 +1119,7 @@
                 const d = await resp.json();
                 msg.textContent = `✅ 已保存并即时生效（更新了 ${d.updated.length} 项）`;
                 msg.style.color = "var(--success)";
+                checkConfigOnLoad();
             } catch (e) {
                 msg.textContent = "❌ 保存失败：" + e.message;
                 msg.style.color = "var(--danger)";
@@ -911,7 +1181,7 @@
                                     <option value="first" ${im.role==="first"?"selected":""}>🖼️ 设为首帧</option>
                                     <option value="last" ${im.role==="last"?"selected":""}>🏁 设为尾帧</option>
                                 </select>
-                                <button onclick="deleteSbImage('${sb._id}', ${idx})" title="删除这张图" style="font-size:12px; padding:2px 7px;">✕</button>
+                                <button class="btn-sm btn-red" onclick="deleteSbImage('${sb._id}', ${idx})" title="删除这张图">✕</button>
                             </div>
                         </div>`;
                 }).join("");
@@ -928,11 +1198,17 @@
                             <button class="btn-del-item" onclick="deleteStoryboard('${sb._id}')">删除</button>
                         </div>
                         <div class="hint" style="margin-top:8px;">时长：${sb.duration || 3}s${sb.images.length > 1 ? ` · 共 ${sb.images.length} 张图${sb.images.some(im=>im.role) ? "（已标记首/尾帧）" : ""}` : ""}</div>
-                        <textarea class="prompt-edit-area" oninput="updateStoryboardPrompt('${sb._id}', this.value)">${currentPrompt}</textarea>
+                        <textarea class="prompt-edit-area" oninput="autoGrow(this);updateStoryboardPrompt('${sb._id}', this.value)" title="可直接修改，或把新要求写进来后点 ✨重写">${currentPrompt}</textarea>
+                        <div style="margin-top:6px; display:flex; gap:6px; align-items:center;">
+                            <button class="btn-rewrite" onclick="regeneratePrompt('storyboard', '${sb._id}')">✨ 重写</button>
+                            <button class="btn-au" onclick="analyzeAU('storyboard', '${sb._id}')" title="从提示词提取表情/动作 AU">😊 AU</button>
+                            <span style="font-size:11px; color:#9ca3af;">直接在框里改或写新要求，重写后覆盖</span>
+                        </div>
+                        <div id="sb-au-${sb._id}" style="margin-top:6px;"></div>
                         <div class="image-slot" id="sb-img-${sb._id}" ${sb.images.length ? `data-image-url="${sb.images[0].url}"` : ''}>${galleryHtml}</div>
-                        <div style="margin-top:14px; display:flex; gap:10px; flex-wrap: wrap;">
+                        <div style="margin-top:14px; display:flex; gap:10px; flex-wrap: wrap; align-items:center;">
                             <button onclick="genImage('sb', '${sb._id}')">${sb.images.length ? '🎨 再生成一张' : '🎨 生成分镜图'}</button>
-                            <button onclick="addSbImage('${sb._id}')">📁 添加本地图</button>
+                            <button class="btn-ghost" onclick="addSbImage('${sb._id}')">📁 添加本地图</button>
                             ${sb.images.length ? `<button class="btn-download" onclick="downloadImage('${sb.images[0].url}', '分镜_${sb.shot_number}.png')">📥 保存原图</button>` : ''}
                             <button onclick="genVideo('${sb._id}')" class="btn-red">生成视频</button>
                         </div>
@@ -946,12 +1222,13 @@
                         <div style="margin-top:12px; padding:12px; background:#f0fdf4; border:1px solid #bbf7d0; border-radius:10px;">
                             <div class="hint" style="margin-bottom:8px; color:#15803d; font-weight:600;">🎬 本分镜已生成视频</div>
                             <video src="${sb.videoUrl}" controls style="max-width:280px; width:100%; border-radius:8px; display:block; border:1px solid var(--border-color);"></video>
-                            <div style="margin-top:8px; display:flex; gap:8px; flex-wrap:wrap;">
+                            <div style="margin-top:8px; display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
                                 <a class="btn-download" href="${sb.videoUrl}" download="分镜_${sb.shot_number || i+1}.mp4" style="text-decoration:none; display:inline-block;">📥 保存到电脑</a>
                                 <button class="btn-del-item" onclick="clearSbVideo('${sb._id}')" title="从分镜移除视频（不删除本地文件）">✕ 移除</button>
                             </div>
                         </div>` : ''}
                     </div>
+                    <div class="sb-insert-handle" onclick="insertStoryboardAfter('${sb._id}')" title="在这条分镜后面插入一条新分镜">＋</div>
                 `;
                 sbList.appendChild(row);
                 // 重渲染后恢复该分镜的进度条状态（轮询进行中不被清掉）
@@ -966,7 +1243,13 @@
             document.getElementById("synopsisText").innerHTML = renderMarkdown(data.synopsis || "—");
             if (currentData.chatHistory && currentData.chatHistory.length > 0) {
                 document.getElementById("chatContextWrapper").classList.remove("hidden");
-                document.getElementById("chatContextBox").innerHTML = currentData.chatHistory.map(msg => `<div style="margin-bottom:8px;"><strong>${msg.role === 'user' ? '👤' : '🤖'}：</strong> ${renderMarkdown(msg.content)}</div>`).join('');
+                document.getElementById("chatContextBox").innerHTML = currentData.chatHistory.map(msg => {
+                    // 附件全文不展示在这里，只用弱化标记代替；完整内容仍注入生成剧本的上下文
+                    const cleaned = collapseAttachments(msg.content).replace(/\[图片\]/g, "").trim();
+                    const chip = attachChipFromContent(msg.content);
+                    const shown = cleaned || chip || "（空）";
+                    return `<div style="margin-bottom:8px;"><strong>${msg.role === 'user' ? '👤' : '🤖'}：</strong> ${renderMarkdown(shown)}</div>`;
+                }).join('');
             } else document.getElementById("chatContextWrapper").classList.add("hidden");
 
             document.getElementById("storySection").classList.remove("hidden");
@@ -980,7 +1263,13 @@
                 card.innerHTML = `
                     <div style="display:flex; align-items:center;"><input class="label" style="flex:1; min-width:0; border:none; border-bottom:1px dashed transparent; background:transparent; padding:0; font-weight:600; color:inherit; font-size:inherit;" title="点击修改名称" value="${escapeAttr(c.name || "角色 " + (i+1))}" onchange="renameItem('character', ${i}, this.value)"><button class="btn-del-item" onclick="deleteItem('character', ${i})">删除</button></div>
                     <div class="value">${renderMarkdown(c.description || "")}</div>
-                    <textarea id="char-prompt-${i}" class="prompt-edit-area" onchange="updatePrompt('character', ${i}, this.value)">${currentPrompt}</textarea>
+                    <textarea id="char-prompt-${i}" class="prompt-edit-area" oninput="autoGrow(this);updatePrompt('character', ${i}, this.value)" title="可直接修改，或把新要求写进来后点 ✨重写">${currentPrompt}</textarea>
+                    <div style="margin-top:6px; display:flex; gap:6px; align-items:center;">
+                        <button class="btn-rewrite" onclick="regeneratePrompt('character', ${i})">✨ 重写</button>
+                        <button class="btn-au" onclick="analyzeAU('character', ${i})" title="从提示词提取表情/动作 AU">😊 AU</button>
+                        <span style="font-size:11px; color:#9ca3af;">直接在框里改或写新要求，重写后覆盖</span>
+                    </div>
+                    <div id="char-au-${i}" style="margin-top:6px;"></div>
                     <div class="image-slot" id="char-img-${i}" ${savedImg ? `data-image-url="${savedImg}"` : ''}>${savedImg ? `<img src="${savedImg}">` : ''}</div>
                     <div style="margin-top:12px; display:flex; flex-wrap:wrap; gap:10px;">
                         <button onclick="genImage('char', ${i})" style="flex:1;">${savedImg ? '重新生成' : '生成'}</button>
@@ -999,7 +1288,13 @@
                 card.innerHTML = `
                     <div style="display:flex; align-items:center;"><input class="label" style="flex:1; min-width:0; border:none; border-bottom:1px dashed transparent; background:transparent; padding:0; font-weight:600; color:inherit; font-size:inherit;" title="点击修改名称" value="${escapeAttr(s.name || "场景 " + (i+1))}" onchange="renameItem('scene', ${i}, this.value)"><button class="btn-del-item" onclick="deleteItem('scene', ${i})">删除</button></div>
                     <div class="value">${renderMarkdown(s.description || "")}</div>
-                    <textarea id="scene-prompt-${i}" class="prompt-edit-area" onchange="updatePrompt('scene', ${i}, this.value)">${currentPrompt}</textarea>
+                    <textarea id="scene-prompt-${i}" class="prompt-edit-area" oninput="autoGrow(this);updatePrompt('scene', ${i}, this.value)" title="可直接修改，或把新要求写进来后点 ✨重写">${currentPrompt}</textarea>
+                    <div style="margin-top:6px; display:flex; gap:6px; align-items:center;">
+                        <button class="btn-rewrite" onclick="regeneratePrompt('scene', ${i})">✨ 重写</button>
+                        <button class="btn-au" onclick="analyzeAU('scene', ${i})" title="从提示词提取表情/动作 AU">😊 AU</button>
+                        <span style="font-size:11px; color:#9ca3af;">直接在框里改或写新要求，重写后覆盖</span>
+                    </div>
+                    <div id="scene-au-${i}" style="margin-top:6px;"></div>
                     <div class="image-slot" id="scene-img-${i}" ${savedImg ? `data-image-url="${savedImg}"` : ''}>${savedImg ? `<img src="${savedImg}">` : ''}</div>
                     <div style="margin-top:12px; display:flex; flex-wrap:wrap; gap:10px;">
                         <button onclick="genImage('scene', ${i})" style="flex:1;">${savedImg ? '重新生成' : '生成'}</button>
@@ -1037,11 +1332,146 @@
             const sb = currentData.storyData.storyboards.find(s => s._id === id);
             if (sb) { sb.edited_prompt = newValue; saveCurrentProject(); }
         }
+        // 要求输入框自动增高（上限 200px，超出后内部滚动）
+        function autoGrow(el) {
+            el.style.height = "auto";
+            el.style.height = Math.min(el.scrollHeight, 200) + "px";
+        }
+        // AU 表情分析：从提示词提取表情/动作关键词 → FACS AU 编码（词库优先，AI 兜底）
+        async function analyzeAU(type, indexOrId) {
+            let ta, outId;
+            if (type === 'character') { ta = document.getElementById(`char-prompt-${indexOrId}`); outId = `char-au-${indexOrId}`; }
+            else if (type === 'scene') { ta = document.getElementById(`scene-prompt-${indexOrId}`); outId = `scene-au-${indexOrId}`; }
+            else { ta = document.querySelector(`.storyboard-row[data-id="${indexOrId}"] .prompt-edit-area`); outId = `sb-au-${indexOrId}`; }
+            const out = document.getElementById(outId);
+            if (!ta || !out) return;
+            const prompt0 = (ta.value || "").trim();
+            if (!prompt0) return alert("提示词为空，无法分析");
+            // 画风圣经（style_bible）会逐字复用在每条提示词里，但它只描述画风、不含表情；
+            // 先整段剔除再分析，避免里面的叙事基调词（如"自嘲式幽默"）让每条都误命中同一表情
+            let prompt = prompt0;
+            const styleBible = currentData.storyData && currentData.storyData.style_bible;
+            if (styleBible && styleBible.length > 10) prompt = prompt.split(styleBible).join(" ").trim();
+            out.innerHTML = `<div style="font-size:12px;color:#6b7280;">😊 正在分析表情/动作 AU…</div>`;
+            try {
+                const resp = await fetch(`${API}/api/extract-au`, {
+                    method: "POST", headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ prompt }),
+                });
+                if (!resp.ok) {
+                    const ej = await resp.json().catch(() => ({}));
+                    throw new Error(ej.detail || "请求失败");
+                }
+                const data = await resp.json();
+                if (!data.matches || !data.matches.length) {
+                    out.innerHTML = `<div style="font-size:12px;color:#9ca3af;">😊 未捕捉到表情/动作关键词</div>`;
+                    return;
+                }
+                const srcTag = data.source === "ai" ? " · AI 兜底" : " · 词库";
+                const tags = data.matches.map(m =>
+                    `<span style="display:inline-block;margin:0 6px 4px 0;padding:2px 8px;background:#fef3c7;border:1px solid #fde68a;border-radius:9999px;font-size:12px;">` +
+                    `<b>${m.au}</b> ${m.label || ""}${m.keywords && m.keywords.length ? `（命中：${m.keywords.join("、")}）` : ""}</span>`
+                ).join("");
+                const tips = (data.tips && data.tips.length)
+                    ? `<div style="font-size:11px;color:#92400e;margin-top:2px;">💡 ${data.tips[0]}</div>` : "";
+                out.innerHTML =
+                    `<div style="font-size:12px;color:#374151;">😊 AU 分析 <span style="color:#9ca3af;">(${data.au_string || "—"}${srcTag})</span></div>` +
+                    tags + tips;
+            } catch (e) {
+                out.innerHTML = `<div style="font-size:12px;color:#ef4444;">😊 AU 分析失败：${e.message}</div>`;
+            }
+        }
+        // 重写单条提示词（人物/场景/分镜）：以框内当前内容为基础（用户的手动改动视为新要求），
+        // 重写结果直接覆盖框内内容
+        async function regeneratePrompt(type, indexOrId) {
+            const sd = currentData.storyData;
+            if (!sd) return alert("请先生成剧本");
+            const payload = { type };
+            let ta;
+            if (type === 'character') {
+                const c = sd.characters[indexOrId]; if (!c) return;
+                payload.name = c.name || ""; payload.description = c.description || "";
+                ta = document.getElementById(`char-prompt-${indexOrId}`);
+            } else if (type === 'scene') {
+                const s = sd.scenes[indexOrId]; if (!s) return;
+                payload.name = s.name || ""; payload.description = s.description || "";
+                ta = document.getElementById(`scene-prompt-${indexOrId}`);
+            } else {
+                const sb = sd.storyboards.find(x => x._id === indexOrId); if (!sb) return;
+                payload.name = `镜头 ${sb.shot_number || ""}`;
+                payload.description = sb.description || "";
+                payload.dialogue = sb.dialogue || "";
+                payload.duration = sb.duration || 3;
+                ta = document.querySelector(`.storyboard-row[data-id="${indexOrId}"] .prompt-edit-area`);
+            }
+            if (!ta) return;
+            payload.old_prompt = (ta.value || "").trim();
+            if (!payload.old_prompt) return alert("提示词为空：先在框里写入内容或你的新要求");
+            payload.style_bible = sd.style_bible || "";
+            payload.synopsis = sd.synopsis || "";
+            payload.characters = (sd.characters || []).map(c => ({ name: c.name || "", image_prompt: c.edited_prompt || c.image_prompt || "" }));
+            try {
+                const resp = await fetch(`${API}/api/regenerate-prompt`, {
+                    method: "POST", headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(payload),
+                });
+                if (!resp.ok) {
+                    const ej = await resp.json().catch(() => ({}));
+                    throw new Error(ej.detail || "请求失败");
+                }
+                const data = await resp.json();
+                if (type === 'character') {
+                    const c = sd.characters[indexOrId];
+                    c.image_prompt = data.image_prompt; delete c.edited_prompt;
+                } else if (type === 'scene') {
+                    const s = sd.scenes[indexOrId];
+                    s.image_prompt = data.image_prompt; delete s.edited_prompt;
+                } else {
+                    const sb = sd.storyboards.find(x => x._id === indexOrId);
+                    sb.image_prompt = data.image_prompt;
+                    if (data.video_prompt) sb.video_prompt = data.video_prompt;
+                    delete sb.edited_prompt;
+                }
+                ta.value = data.image_prompt;   // 新提示词覆盖框内旧内容
+                autoGrow(ta);
+                saveCurrentProject();
+            } catch (e) {
+                alert("重写提示词失败：" + e.message);
+            }
+        }
         function deleteStoryboard(id) {
             if (!confirm("确认删除？")) return;
             currentData.storyData.storyboards = currentData.storyData.storyboards.filter(s => s._id !== id);
             currentData.storyData.storyboards.forEach((sb, i) => sb.shot_number = i + 1);
             saveCurrentProject(); renderStoryboards(currentData.storyData);
+        }
+        function insertStoryboardAfter(sbId) {
+            const arr = currentData.storyData.storyboards;
+            const idx = arr.findIndex(s => s._id === sbId);
+            if (idx === -1) return;
+            const newSb = {
+                _id: 'sb_' + Date.now() + '_i' + Math.floor(Math.random() * 10000),
+                shot_number: idx + 2,
+                description: "新分镜描述",
+                dialogue: "",
+                duration: 3,
+                image_prompt: "描述画面",
+                video_prompt: "",
+                images: []
+            };
+            arr.splice(idx + 1, 0, newSb);
+            arr.forEach((s, i) => s.shot_number = i + 1);
+            saveCurrentProject();
+            renderStoryboards(currentData.storyData);
+            // 滚动到新分镜并聚焦提示词框，方便直接填写
+            setTimeout(() => {
+                const row = document.querySelector(`.storyboard-row[data-id="${newSb._id}"]`);
+                if (row) {
+                    row.scrollIntoView({ behavior: "smooth", block: "center" });
+                    const ta = row.querySelector(".prompt-edit-area");
+                    if (ta) { ta.focus(); autoGrow(ta); }
+                }
+            }, 60);
         }
         function addNewItem(type) {
             if (!currentData.storyData) return;
@@ -1098,6 +1528,19 @@
             const sel = document.getElementById("workflowSelect");
             return sel.value === "custom" ? document.getElementById("i2vWorkflowInput").value.trim() : sel.value;
         }
+        // 视频时长：读取输入框并钳制到 1-15 秒（各工作流支持的档位不同，平台会二次校验）
+        function getVideoDuration() {
+            const el = document.getElementById("videoDurationInput");
+            let v = parseInt(el && el.value, 10);
+            if (!v || v < 1) v = 5;
+            if (v > 15) v = 15;
+            if (el) el.value = v;
+            return v;
+        }
+        function onDurationChange() {
+            getVideoDuration();
+            saveCurrentProject();
+        }
         function onWorkflowChange() {
             const kind = getWorkflowKind();
             const mode = getVideoMode();
@@ -1136,11 +1579,21 @@
                 if (mode === "first_frame") {
                     const firstUrl = (taggedFirst || sbImages[0]).url;
                     if (!taggedFirst && sbImages.length > 1) alert("该分镜有多张图且未标记\"🖼️ 首帧\"，默认用第 1 张作为首帧；可回到分镜画廊里标记。");
-                    body = { image_urls: [firstUrl], first_frame_url: firstUrl, frame_mode: "first_frame" };
+                    if (taggedLast) {
+                        // 用户同时标记了尾帧：自动升级为首尾帧过渡，避免"同一张图补齐另一帧"导致起点=终点
+                        body = { image_urls: [firstUrl, taggedLast.url], first_frame_url: firstUrl, last_frame_url: taggedLast.url, frame_mode: "first_last" };
+                    } else {
+                        body = { image_urls: [firstUrl], first_frame_url: firstUrl, frame_mode: "first_frame" };
+                    }
                 } else if (mode === "last_frame") {
                     const lastUrl = (taggedLast || sbImages[0]).url;
                     if (!taggedLast && sbImages.length > 1) alert("该分镜有多张图且未标记\"🏁 尾帧\"，默认用第 1 张作为尾帧；可回到分镜画廊里标记。");
-                    body = { image_urls: [lastUrl], last_frame_url: lastUrl, frame_mode: "last_frame" };
+                    if (taggedFirst) {
+                        // 用户同时标记了首帧：自动升级为首尾帧过渡，视频从首帧出发、精确收束到尾帧
+                        body = { image_urls: [taggedFirst.url, lastUrl], first_frame_url: taggedFirst.url, last_frame_url: lastUrl, frame_mode: "first_last" };
+                    } else {
+                        body = { image_urls: [lastUrl], last_frame_url: lastUrl, frame_mode: "last_frame" };
+                    }
                 } else { // first_last：首帧图 → 尾帧图 过渡
                     const firstUrl = (taggedFirst || sbImages[0]).url;
                     const lastUrl = (taggedLast || (sbImages.length > 1 ? sbImages[sbImages.length - 1].url : firstUrl));
@@ -1149,6 +1602,21 @@
                     }
                     body = { image_urls: [firstUrl, lastUrl], first_frame_url: firstUrl, last_frame_url: lastUrl, frame_mode: "first_last" };
                 }
+
+                // 首尾帧工作流强制要求两帧：仅当"另一帧确实没有标记"时才会被后端用同一张图补齐（起点=终点），
+                // 此时才弹窗告知风险；已标记两帧的不打扰
+                if (getWorkflowKind() === "i2v" &&
+                    ((mode === "first_frame" && !taggedLast) || (mode === "last_frame" && !taggedFirst))) {
+                    const ok = confirm(
+                        "⚠️ 该首尾帧工作流要求\"首帧+尾帧\"两张图，当前分镜只有一张可用，" +
+                        "将用同一张图补齐另一帧（起点=终点）。\n\n" +
+                        "这样生成的视频容易静止不动、或出现为回到起点而瞎编的怪异动作。\n\n" +
+                        "✔ 推荐：取消后回到分镜画廊，给另一张图标记\"🖼️ 首帧\"或\"🏁 尾帧\"再生成\n" +
+                        "✔ 或切回 🎬 参考模式（zm 系列工作流），让 AI 参考单图自由发挥动作\n\n" +
+                        "确定仍要用当前方式强行生成吗？"
+                    );
+                    if (!ok) return;
+                }
             }
 
             const log = document.getElementById("videoLog");
@@ -1156,28 +1624,29 @@
             log.style.color = "#3b82f6";
 
             try {
-                let prompt = sbItem.edited_prompt || sbItem.image_prompt || sbItem.description;
-                let workflowId;
-                if (mode === "reference") {
-                    workflowId = getSelectedWorkflowId();
-                    if (document.getElementById("strictRefCheck").checked) {
-                        prompt += "。镜头完全固定，角色保持参考图中的姿势和位置不变，仅允许眨眼、呼吸、尾巴轻摆等细微动作。全程不得新增或删除任何画面元素，角色的外貌、服装、配饰、姿势，以及背景陈设、光影与画风必须与参考图完全一致，保持静止画面般的稳定";
-                    }
-                } else {
-                    workflowId = getSelectedWorkflowId();
-                    if (mode === "first_last") {
-                        prompt += "。视频从首帧画面自然过渡演化到尾帧画面，过渡过程平滑连贯，保持角色造型、服装配饰与画风一致";
-                    }
-                }
+                // 提示词只来自可编辑窗口（分镜提示词输入框）：输入框显示什么就发送什么，
+                // 不再注入任何固定页面文案（一致性约束/过渡说明等已移除）
+                // 新模板会额外产出 video_prompt（专给图生视频的运动描述），旧项目没有该字段则回退 image_prompt
+                let prompt = sbItem.edited_prompt || sbItem.video_prompt || sbItem.image_prompt || sbItem.description;
+                let workflowId = getSelectedWorkflowId();
+                // 测量首张参考图的实际宽高比，后端据此自动选横屏/竖屏档位（H3 工作流默认出竖屏）
+                const firstImgUrl = (body.image_urls && body.image_urls[0]) || body.first_frame_url || body.last_frame_url || null;
+                const imageAspect = await new Promise(resolve => {
+                    if (!firstImgUrl) return resolve(null);
+                    const probe = new Image();
+                    probe.onload = () => resolve(probe.naturalHeight > 0 ? probe.naturalWidth / probe.naturalHeight : null);
+                    probe.onerror = () => resolve(null);
+                    probe.src = firstImgUrl;
+                });
                 const videoResp = await fetch(`${API}/api/generate-video`, {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({
                         prompt,
                         ...body,
-                        duration: 5,
+                        duration: getVideoDuration(),
                         resolution: "768p",
-                        aspect_ratio: "portrait",
+                        image_aspect: imageAspect,
                         workflow_id: workflowId
                     }),
                 });
@@ -1341,6 +1810,24 @@
         }
 
         initProjects();
+    </script>
+
+    <!-- 灯箱：点击页面上的图片查看大图，点击任意处/Esc 关闭 -->
+    <div id="lightbox" onclick="this.classList.remove('show')"><img id="lightboxImg" src=""></div>
+    <script>
+        document.addEventListener("click", (e) => {
+            const img = e.target;
+            if (img.tagName !== "IMG" || img.closest("#lightbox")) return;
+            const src = img.getAttribute("src") || "";
+            if (!src || img.closest("#chatImagePreviewArea")) return;
+            e.preventDefault();
+            e.stopPropagation();
+            document.getElementById("lightboxImg").src = src;
+            document.getElementById("lightbox").classList.add("show");
+        });
+        document.addEventListener("keydown", (e) => {
+            if (e.key === "Escape") document.getElementById("lightbox").classList.remove("show");
+        });
     </script>
 </body>
 </html>

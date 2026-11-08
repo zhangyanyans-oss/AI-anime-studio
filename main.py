@@ -2,10 +2,13 @@ import os
 import sys
 import json
 import re
+import io
 import base64
 import uuid
 import shutil
 import asyncio
+import zipfile
+from urllib.parse import quote
 from typing import List, Dict, Any
 from fastapi import FastAPI, HTTPException, Query, File, UploadFile
 from fastapi.staticfiles import StaticFiles
@@ -14,6 +17,7 @@ from pydantic import BaseModel
 from openai import OpenAI
 import httpx
 from dotenv import load_dotenv
+import au_lexicon
 
 # ---------- PyInstaller 打包支持 ----------
 # exe 双击运行时：切到 exe 所在目录（.env、static/uploads 等持久数据都放 exe 旁边），
@@ -29,8 +33,16 @@ if getattr(sys, "frozen", False):
             os.makedirs(_dst, exist_ok=True)
             for _f in _files:
                 _dstf = os.path.join(_dst, _f)
-                if not os.path.exists(_dstf):
+                # uploads/temp 是用户持久数据，绝不覆盖；其余（index.html、
+                # style-previews 等）是程序文件，随新版本 exe 覆盖更新
+                _parts = {p.lower() for p in os.path.normpath(_dstf).split(os.sep)}
+                if _parts & {"uploads", "temp"}:
+                    continue
+                try:
                     shutil.copy2(os.path.join(_root, _f), _dstf)
+                except OSError as _e:
+                    # 个别文件被占用/权限不足时不中断启动（下次启动会再尝试覆盖）
+                    print(f"⚠ 更新 {_dstf} 失败（跳过）: {_e}")
 
 # 只读当前目录的 .env（exe 旁边 / 项目根目录），不向上级目录搜索，避免误读别处的配置
 load_dotenv(os.path.join(os.getcwd(), ".env"))
@@ -52,6 +64,68 @@ deepseek_client = OpenAI(
 )
 
 DOUBAO_API_KEY = os.getenv("ARK_API_KEY")
+
+def deepseek_friendly_error(e: Exception) -> str:
+    """把 DeepSeek 调用异常翻译成可操作的人话（方便在别人机器上排查）。"""
+    raw = str(e)
+    low = raw.lower()
+    if getattr(deepseek_client, "api_key", "") in ("not-configured", None, ""):
+        return ("未配置 DeepSeek API Key，无法生成剧本/头脑风暴。请在程序(exe)同目录创建 .env 文件，"
+                "写入一行：DEEPSEEK_API_KEY=sk-你的key；或打开页面右上角 ⚙️ API 设置直接粘贴 Key 并保存。")
+    if "401" in raw or "authentication" in low or ("invalid" in low and "key" in low):
+        return "DeepSeek API Key 无效或已过期，请检查 .env 里的 DEEPSEEK_API_KEY 是否正确。"
+    if "402" in raw or "insufficient balance" in low:
+        return "DeepSeek 账户余额不足，请到 platform.deepseek.com 充值后重试。"
+    if "429" in raw:
+        return "DeepSeek 请求过于频繁，请稍等几秒再试。"
+    if isinstance(e, (ConnectionError, TimeoutError)) or "connection" in low or "timeout" in low or "getaddrinfo" in low or "ssl" in low:
+        return ("无法连接 DeepSeek 服务器（api.deepseek.com）。请确认这台电脑可以上网；"
+                "公司/校园网络或防火墙可能拦截了该域名，可尝试换网络。")
+    return f"DeepSeek 调用失败：{raw[:200]}"
+
+# ---------- 模型 JSON 输出的健壮解析 ----------
+def extract_json_text(content: str) -> str:
+    """剥掉 DeepSeek 偶尔夹带的 markdown 代码块围栏与前后杂文本，只留 JSON 本体。"""
+    text = content.strip()
+    m = re.search(r"```(?:json)?\s*(.*?)\s*```", text, re.S)
+    if m:
+        text = m.group(1).strip()
+    else:
+        # 没有围栏时，截取第一个 { 到最后一个 } 之间的部分
+        start, end = text.find("{"), text.rfind("}")
+        if start != -1 and end > start:
+            text = text[start:end + 1]
+    return text
+
+def repair_json_text(text: str) -> str:
+    """轻量修复常见 JSON 瑕疵：全角/智能引号、尾逗号、中文冒号。"""
+    text = text.replace("\u201c", '"').replace("\u201d", '"')   # "" -> "
+    text = text.replace("\u2018", "'").replace("\u2019", "'")   # '' -> '
+    text = text.replace("\uff1a", ":").replace("\uff0c", ",")   # ：, ->
+    text = re.sub(r",\s*([}\]])", r"\1", text)                  # 去尾逗号
+    return text
+
+def parse_model_json(content: str, finish_reason: str | None = None) -> Any:
+    """尽力解析模型返回的 JSON；失败抛 ValueError，错误信息带具体原因。"""
+    if finish_reason == "length":
+        raise ValueError("输出长度超出上限被截断")
+    text = extract_json_text(content)
+    candidates = [text]
+    repaired = repair_json_text(text)
+    if repaired != text:
+        candidates.append(repaired)
+    for cand in candidates:
+        try:
+            return json.loads(cand)
+        except json.JSONDecodeError:
+            continue
+    raise ValueError(f"无法从模型输出中解析出 JSON（输出开头：{content[:80]!r}）")
+
+def deepseek_json(response) -> Any:
+    """从 DeepSeek 响应对象中解析 JSON，失败抛 ValueError（带原因）。"""
+    choice = response.choices[0]
+    return parse_model_json(choice.message.content or "", getattr(choice, "finish_reason", None))
+
 DOUBAO_BASE = "https://ark.cn-beijing.volces.com/api/v3"
 DOUBAO_MODEL = os.getenv("DOUBAO_MODEL", "doubao-seedream-5-0-flash-260915")
 
@@ -78,17 +152,29 @@ class VideoRequest(BaseModel):
     image_urls: list[str] = []
     duration: int = 5
     resolution: str = "768p"
-    aspect_ratio: str = "portrait"
     workflow_id: str | None = None
     frame_mode: str = "reference"  # reference=参考图 / first_frame=首帧 / last_frame=尾帧 / first_last=首尾帧过渡
     first_frame_url: str | None = None  # 首帧模式下作为视频第一帧的图
     last_frame_url: str | None = None   # 尾帧模式下作为视频最后一帧的图
+    image_aspect: float | None = None   # 首张参考图的宽/高比（前端计算传入），用于自动选横竖屏档位
 
 class BrainstormRequest(BaseModel):
     step: int
     messages: List[Dict[str, Any]]
     user_input: str
     image_base64: str | None = None
+
+class RegeneratePromptRequest(BaseModel):
+    type: str  # character / scene / storyboard
+    name: str | None = None
+    description: str | None = None
+    dialogue: str | None = None            # 分镜用
+    duration: int = 3                      # 分镜用
+    style_bible: str | None = None         # 全片画风圣经
+    synopsis: str | None = None            # 剧情梗概
+    characters: List[Dict[str, Any]] | None = None  # [{name, image_prompt}] 角色外观锚点
+    old_prompt: str | None = None          # 旧提示词（在其基础上重写）
+    feedback: str | None = None            # 用户的新要求（最高优先级）
 
 # ---------- 1. 头脑风暴接口 (完整版) ----------
 BRAINSTORM_SYSTEM_PROMPT = """你是一个专业的动画编剧与头脑风暴助手。
@@ -109,6 +195,9 @@ BRAINSTORM_SYSTEM_PROMPT = """你是一个专业的动画编剧与头脑风暴�
 
 @app.post("/api/brainstorm")
 async def brainstorm(req: BrainstormRequest):
+    if getattr(deepseek_client, "api_key", "") in ("not-configured", None, ""):
+        raise HTTPException(400, "未配置 DeepSeek API Key。请在程序(exe)同目录创建 .env 文件写入 DEEPSEEK_API_KEY=sk-你的key，"
+                                 "或打开页面右上角 ⚙️ API 设置粘贴 Key 并保存后重试。")
     messages = [{"role": "system", "content": BRAINSTORM_SYSTEM_PROMPT}]
     for msg in req.messages:
         messages.append(msg)
@@ -143,30 +232,54 @@ async def brainstorm(req: BrainstormRequest):
         else:
             return {"status": "asking", "reply": reply}
     except Exception as e:
-        raise HTTPException(500, str(e))
+        raise HTTPException(500, deepseek_friendly_error(e))
 
-# ---------- 2. 生成剧本、角色、分镜 (完整版) ----------
-STORY_SYSTEM_PROMPT = """你是一个动画短片策划助手。用户会提供一个故事想法或聊天记录，可能还会附带一张参考图。
-请结合这些信息，严格按照以下 JSON 格式输出，不要添加任何其他文字：
+# ---------- 2. 生成剧本、角色、分镜 (工业级提示词模板 v2) ----------
+STORY_SYSTEM_PROMPT = """你是一位资深的 AI 动画短片导演兼提示词工程师，精通为文生图模型（豆包 seedream）和图生视频模型（MiniMax-H3）撰写工业级提示词。
+用户会提供一个故事想法或头脑风暴对话记录，可能附带一张参考图（若附带，请沿用其画风、色彩与角色形象，并提炼进 style_bible）。
 
+【输出格式】严格输出以下 JSON（键名不得改动，不要 markdown 代码块，不要任何 JSON 之外的文字）：
 {
+  "style_bible": "全片统一画风圣经：一段 50-80 字的固定画风描述（媒介类型+画风流派+主色调+光影基调+画质关键词）。后续每条分镜 image_prompt 都必须以它开头逐字复用，这是全片画风一致性的核心。",
   "hook": "一句话钩子，用于吸引观众",
   "synopsis": "剧情梗概，200字以内",
   "characters": [
-    {"name": "角色名", "description": "外貌、服装、风格描述", "image_prompt": "用于生图的英文/中文提示词"}
+    {"name": "角色名",
+     "description": "角色设定：年龄、身份、性格，一句话",
+     "image_prompt": "角色设定图提示词，固定写法：style_bible 原文 + 「单人全身立绘、完整入画（头顶到脚踝全部可见）、正面或四分之三侧面、自然站姿目视镜头、简洁纯色浅背景、柔和均匀打光」+ 逐一写死可复用的外观锚点：发型发色、瞳色、五官特征、体型年龄、服装款式与颜色、随身标志物。60-120 字。此图将作为该角色在所有分镜中的参考图，因此禁止出现场景、动作戏、其他人物。"}
   ],
   "scenes": [
-    {"name": "场景名", "description": "场景描述", "image_prompt": "用于生图的提示词"}
+    {"name": "场景名",
+     "description": "场景的功能与氛围，一句话",
+     "image_prompt": "场景设定图提示词：style_bible 原文 + 大远景空镜（画面中无人物）+ 空间布局与 2-3 个标志性陈设 + 时间天气 + 光线方向。60-120 字。此图将作为场景参考图。"}
   ],
   "storyboards": [
-    {"shot_number": 1, "description": "画面描述", "dialogue": "台词或旁白", "duration": 3, "image_prompt": "用于生成该分镜图的提示词"}
+    {"shot_number": 1,
+     "description": "本镜头的剧情作用，一句话",
+     "dialogue": "该镜头的台词或旁白，没有则输出空字符串",
+     "duration": 3,
+     "image_prompt": "分镜图提示词（文生图用），必须按结构化模板撰写：单行输出，小节用【】标题依次排列，每个小节必须写，禁止漏节。【画面内容】在(地点)，(谁)正在(做什么)，画面正在发生(具体事件)，角色逐字复用其 image_prompt 的外貌服装锚点，写明表情与动作瞬间；【镜头细节】焦段(如35mm/85mm)、构图(主体居中/对称/前景遮挡)、景别(远/全/中/近/特)、机位(固定/低角度/俯拍/仰拍)；【美术风格】style_bible 原文；【光源】光源类型(顶光/逆光/侧光/蝴蝶光/伦勃朗光/硬光/柔光/自然光等)及光如何影响场景；【氛围】观众的情绪感受(开心/孤独/紧张/充满希望等)；【影调】冷暖色调、饱和度、明暗关系；【约束】正向表达：画面无文字水印分格、动作自然符合物理规律、本镜头需锁定的要点。上下文不足以确定的内容写【待补：说明】占位留给创作者修改，禁止编造关键设定。",
+     "video_prompt": "图生视频提示词，单行输出：【动作时序】首先…然后…最后…(总时长=duration秒)；【镜头运动】推/拉/摇/移/环绕/跟随/固定机位；【声音】仅当剧情有明确声音需求时注明，没有就省略此节。禁止引入分镜图中不存在的新人物/物体/场景，禁止“突然”“闪现”“切换到”等跳变词，不复述静态外观。"}
   ]
 }
 
-注意：输出必须是合法 JSON，不要用 markdown 代码块包裹。"""
+【导演规则】
+1. storyboards 数量 8-16 个，按剧情节奏编排；第一个镜头必须能在 3 秒内抓住眼球（悬念/冲击画面/反差）。
+2. 景别要有剪辑感：相邻镜头避免连续使用相同景别，重点情绪用特写强调，转场处可用大远景。
+3. 同一场景内的相邻镜头，时间、天气、光线必须连续一致；跨场景才允许变化。
+4. duration 只能取 2 到 5 的整数：静态对话 2-3 秒，动作镜头 3-5 秒。
+5. dialogue 短而口语化，单镜头不超过两句；没有台词就留空字符串，不要硬凑。
+6. 所有分镜 image_prompt 中同一角色的外观描述，必须与该角色 image_prompt 逐字相同——这是参考图机制下保持角色一致性的关键。
+7. 全片画风、色调必须统一，由 style_bible 锁定；不得中途变换风格。
+8. 素材引用（参考图/音频/视频）与全局设定（资产库）是创作者的输入，不由你生成；不要虚构素材，相关需求写进【约束】或【待补】。
+9. 每条分镜 image_prompt 必须包含全部【】小节且单行输出；不确定的小节写【待补：说明】，让创作者修改后重写。
+10. 输出必须是可直接 json.loads 的合法 JSON：双引号、无注释、无尾逗号，字符串内不要出现真实换行。"""
 
 @app.post("/api/generate-story")
 async def generate_story(req: StoryRequest):
+    if getattr(deepseek_client, "api_key", "") in ("not-configured", None, ""):
+        raise HTTPException(400, "未配置 DeepSeek API Key。请在程序(exe)同目录创建 .env 文件写入 DEEPSEEK_API_KEY=sk-你的key，"
+                                 "或打开页面右上角 ⚙️ API 设置粘贴 Key 并保存后重试。")
     try:
         user_content = []
         
@@ -192,24 +305,175 @@ async def generate_story(req: StoryRequest):
         else:
             final_content = user_content
 
+        last_err = "未知错误"
+        for attempt in range(2):  # 解析失败自动重试 1 次
+            response = deepseek_client.chat.completions.create(
+                model="deepseek-chat",
+                messages=[
+                    {"role": "system", "content": STORY_SYSTEM_PROMPT},
+                    {"role": "user", "content": final_content},
+                ],
+                response_format={"type": "json_object"},
+                max_tokens=16384,
+            )
+            choice = response.choices[0]
+            content = choice.message.content or ""
+            if not content.strip():
+                last_err = "DeepSeek 返回空内容"
+                print(f"[generate-story] 第 {attempt + 1} 次输出为空，{'重试' if attempt == 0 else '放弃'}")
+                continue
+            try:
+                return parse_model_json(content, getattr(choice, "finish_reason", None))
+            except ValueError as e:
+                last_err = str(e)
+                print(f"[generate-story] 第 {attempt + 1} 次输出解析失败：{last_err}")
+        raise HTTPException(
+            500,
+            f"DeepSeek 连续 2 次返回的内容都无法解析成 JSON（{last_err}）。"
+            "请再试一次；若反复出现，多半是剧本太长导致输出被截断，可缩短故事想法后重试。"
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, deepseek_friendly_error(e))
+
+# ---------- 2.5 单条提示词重生成（人物 / 场景 / 分镜） ----------
+REGEN_SYSTEM_PROMPT = """你是 AI 动画工作台的提示词重写引擎，负责把一条不够精细的生图提示词重写成工业级提示词。
+
+【画风圣经】用户会提供全片统一的画风描述（style_bible），重写后的 image_prompt 必须以它的原文开头，保证全片画风一致。
+
+【三类提示词的固定规范】
+1. 角色（character）：角色设定图。style_bible 原文 + 「单人全身立绘、完整入画（头顶到脚踝全部可见）、正面或四分之三侧面、自然站姿目视镜头、简洁纯色浅背景、柔和均匀打光」+ 逐一写死可复用的外观锚点：发型发色、瞳色、五官特征、体型年龄、服装款式与颜色、随身标志物。60-120 字。禁止出现场景、动作戏、其他人物。
+2. 场景（scene）：场景设定空镜。style_bible 原文 + 大远景空镜（画面中无人物）+ 空间布局与 2-3 个标志性陈设 + 时间天气 + 光线方向。60-120 字。
+3. 分镜（storyboard）：结构化模板，单行输出，小节用【】标题依次排列，每个小节必须写：【画面内容】在(地点)，(谁)正在(做什么)，画面正在发生(具体事件)，出现的角色逐字复用其角色锚点的外貌服装描述，写明表情与动作瞬间；【镜头细节】焦段(如35mm/85mm)、构图(主体居中/对称/前景遮挡)、景别(远/全/中/近/特)、机位(固定/低角度/俯拍/仰拍)；【美术风格】style_bible 原文；【光源】光源类型(顶光/逆光/侧光/蝴蝶光/伦勃朗光/硬光/柔光/自然光等)及光如何影响场景；【氛围】观众的情绪感受；【影调】冷暖色调、饱和度、明暗关系；【约束】正向表达：无文字水印分格、动作自然符合物理规律、本镜头需锁定的要点。上下文不足写【待补：说明】，禁止编造。
+
+【硬性禁止】画面出现任何文字、字幕、水印、边框、分格、多格拼图；禁止抽象词（如“幸福”“回忆”“命运”）；禁止把台词写进画面。
+
+【video_prompt 规范】仅分镜类型需要输出，单行输出：【动作时序】首先…然后…最后…(总时长=该镜头持续秒数)；【镜头运动】推/拉/摇/移/环绕/跟随/固定机位；【声音】仅当有明确声音需求时注明，没有就省略。画面起点即该分镜图。硬性禁止：引入分镜图中不存在的新人物/物体/场景；禁止“突然”“闪现”“切换到”等跳变词；不要复述静态外观。
+
+【用户修改要求】旧提示词是用户当前工作框内的内容，是最高优先级的内容来源：其中用户亲笔写下的具体细节（人物年龄、体型、五官、服装、随身物、动作、表情、地点、道具、光源、氛围、风格等）必须逐字保留，严禁替换、省略、泛化或“换种说法”。重写只允许做三件事：①把内容套进对应类型的结构化模板并分节；②补全模板要求但用户没写的维度（不确定的写【待补：说明】，禁止编造）；③语言规范化。若角色锚点与用户描述冲突，一律以用户描述为准；若旧提示词很短且明显是一句修改指令（如“换成雨夜”）而非完整提示词，将其整体视为用户的新要求，结合上下文重写出完整的结构化提示词。
+
+【待补占位规则】若旧提示词含有【待补：xx】，而用户的新要求没有给出对应信息，则原样保留该【待补：xx】（可以写得更具体），不要替用户拍板编造；用户在新要求里明确了的内容，必须替换掉对应的【待补】。
+【素材与资产】素材引用（参考图/音频/视频）与全局设定（资产库）是创作者的输入，不由你生成、不要虚构；相关需求写进【约束】或【待补】。
+
+【输出】严格输出 JSON：{"image_prompt": "...", "video_prompt": "..."}。非分镜类型 video_prompt 输出空字符串。不要 markdown 代码块，不要任何 JSON 之外的文字。"""
+
+@app.post("/api/regenerate-prompt")
+async def regenerate_prompt(req: RegeneratePromptRequest):
+    if getattr(deepseek_client, "api_key", "") in ("not-configured", None, ""):
+        raise HTTPException(400, "未配置 DeepSeek API Key，无法重新生成提示词。")
+    t = (req.type or "").lower()
+    if t not in ("character", "scene", "storyboard"):
+        raise HTTPException(400, "type 必须是 character / scene / storyboard")
+
+    type_label = {"character": "角色设定图", "scene": "场景设定空镜", "storyboard": "分镜图"}[t]
+    user_lines = []
+    if req.style_bible:
+        user_lines.append(f"画风圣经（重写后必须以其原文开头）：{req.style_bible}")
+    if req.synopsis:
+        user_lines.append(f"剧情梗概：{req.synopsis}")
+    if t == "storyboard" and req.characters:
+        anchors = "；".join(
+            f"{str(c.get('name') or '')}：{str(c.get('image_prompt') or '')}" for c in req.characters
+        )
+        user_lines.append(f"角色外观锚点（用户提示词里没写外貌细节时才参考复用；若与用户当前版本的提示词冲突，以用户提示词为准）：{anchors}")
+    user_lines.append(f"要重写的提示词类型：{type_label}")
+    if req.name:
+        user_lines.append(f"名称：{req.name}")
+    if req.description:
+        user_lines.append(f"内容说明（剧情背景参考，若与用户当前版本的提示词冲突，以提示词为准）：{req.description}")
+    if t == "storyboard":
+        user_lines.append(f"台词（仅用于理解剧情，禁止写进画面）：{req.dialogue or '（无）'}")
+        user_lines.append(f"该镜头时长：{req.duration} 秒")
+    if req.old_prompt:
+        user_lines.append(f"用户当前版本的提示词（最高优先级，其中用户写下的具体细节必须逐字保留）：{req.old_prompt}")
+    if req.feedback:
+        user_lines.append(f"用户的新要求（最高优先级，必须落实）：{req.feedback}")
+
+    try:
         response = deepseek_client.chat.completions.create(
             model="deepseek-chat",
             messages=[
-                {"role": "system", "content": STORY_SYSTEM_PROMPT},
-                {"role": "user", "content": final_content},
+                {"role": "system", "content": REGEN_SYSTEM_PROMPT},
+                {"role": "user", "content": "\n".join(user_lines)},
             ],
             response_format={"type": "json_object"},
-            max_tokens=4096,
+            max_tokens=1500,
+            temperature=0.8,
         )
-        content = response.choices[0].message.content
-        if not content or not content.strip():
-            raise HTTPException(500, "DeepSeek 返回空内容，请重试")
-        data = json.loads(content)
-        return data
-    except json.JSONDecodeError:
-        raise HTTPException(500, "DeepSeek 返回的不是合法 JSON，请重试或调整提示词")
+        data = deepseek_json(response)
+        image_prompt = str(data.get("image_prompt") or "").strip()
+        if not image_prompt:
+            raise HTTPException(500, "重新生成失败：模型未返回提示词，请重试")
+        log_prompt("重生成提示词", image_prompt, f"type={t}")
+        return {
+            "image_prompt": image_prompt,
+            "video_prompt": str(data.get("video_prompt") or "").strip() if t == "storyboard" else "",
+        }
+    except ValueError as e:
+        print(f"[regenerate-prompt] 输出解析失败：{e}")
+        raise HTTPException(500, "DeepSeek 返回的不是合法 JSON，请重试")
+    except HTTPException:
+        raise
     except Exception as e:
-        raise HTTPException(500, str(e))
+        raise HTTPException(500, deepseek_friendly_error(e))
+
+# ---------- 2.6 AU 表情分析：从提示词捕捉表情/动作关键词，映射到 FACS Action Units ----------
+class ExtractAURequest(BaseModel):
+    prompt: str
+
+@app.post("/api/extract-au")
+async def extract_au(req: ExtractAURequest):
+    # 第一层：本地词库匹配（零成本、毫秒级）
+    result = au_lexicon.extract_aus(req.prompt)
+    if result["matches"]:
+        result["source"] = "lexicon"
+        result["tips"] = au_lexicon.AU_TIPS
+        return result
+
+    # 第二层：词库没命中 → DeepSeek 兜底智能映射（拿 AU 速查表当对照依据）
+    if getattr(deepseek_client, "api_key", "") not in ("not-configured", None, ""):
+        try:
+            response = deepseek_client.chat.completions.create(
+                model="deepseek-chat",
+                messages=[
+                    {"role": "system", "content": (
+                        "你是 FACS（面部动作编码系统）表情分析器。给定一段提示词和 AU 速查表，"
+                        "找出其中所有表情与动作，映射到 AU 编码组合。规则："
+                        f"只允许使用速查表中存在的 AU 编码（含 AU51-AU58 头部动作）；最多输出 5 组；"
+                        "提示词中的脸型、年龄、外貌、服饰、身份描述（如鹅蛋脸、圆脸、青年、和服等）一律忽略，"
+                        "只提取微表情和面部/头部动作；"
+                        'label 用不超过 12 字的中文概括；没有表情/动作就输出 {"matches": []}。'
+                        '严格只输出 JSON：{"matches": [{"au": "AU12+AU6", "label": "真心笑"}]}，'
+                        "不要 markdown，不要其他文字。"
+                    )},
+                    {"role": "user", "content": (
+                        f"AU速查表：{json.dumps(au_lexicon.AU_TABLE, ensure_ascii=False)}\n\n"
+                        f"提示词：{req.prompt}"
+                    )},
+                ],
+                response_format={"type": "json_object"},
+                max_tokens=400,
+                temperature=0.2,
+            )
+            data = deepseek_json(response)
+            matches = []
+            for m in data.get("matches", [])[:5]:
+                au = str(m.get("au") or "").strip()
+                if re.search(r"AU\d+", au):  # 校验至少含一个合法 AU 编码
+                    matches.append({"au": au, "label": str(m.get("label") or "")[:12], "keywords": []})
+            if matches:
+                codes, seen = [], set()
+                for m in matches:
+                    for code in re.findall(r"AU\d+", m["au"]):
+                        if code not in seen:
+                            seen.add(code); codes.append(code)
+                log_prompt("AU分析(AI兜底)", req.prompt[:120], f"结果={'/'.join(m['au'] for m in matches)}")
+                return {"matches": matches, "au_string": "+".join(codes), "source": "ai"}
+        except Exception as e:
+            print(f"[AU分析] DeepSeek 兜底失败，按无命中处理: {type(e).__name__}: {e}")
+
+    return {"matches": [], "au_string": "", "source": "lexicon"}
 
 # ---------- 3. 豆包生图 (存本地返回 URL) ----------
 MAX_REF_IMAGES = 10  # 豆包 seedream 参考图上限
@@ -264,7 +528,7 @@ def select_relevant_references(pool: list[str], meta: list[Dict[str, Any]] | Non
                 max_tokens=200,
                 temperature=0.1,
             )
-            data = json.loads(response.choices[0].message.content)
+            data = deepseek_json(response)
             picked = [int(i) for i in data.get("indices", []) if isinstance(i, (int, str)) and str(i).lstrip("-").isdigit()]
             picked = [i for i in picked if 0 <= i < len(pool)]
             # 去重保序，角色优先排序
@@ -280,8 +544,18 @@ def select_relevant_references(pool: list[str], meta: list[Dict[str, Any]] | Non
 
     return list(range(MAX_REF_IMAGES))
 
+# ---------- 调试日志：把每次发给模型的提示词追加写入文件，便于排查"生成内容不对" ----------
+def log_prompt(kind: str, prompt: str, extra: str = ""):
+    try:
+        from datetime import datetime
+        with open("debug_prompts.log", "a", encoding="utf-8") as f:
+            f.write(f"[{datetime.now().strftime('%m-%d %H:%M:%S')}] {kind} {extra}\n{prompt}\n{'-'*60}\n")
+    except Exception:
+        pass
+
 @app.post("/api/generate-image")
 async def generate_image(req: ImageRequest):
+    log_prompt("生图", req.prompt, f"size={req.size} 参考图={len(req.reference_urls or [])}张")
     payload = {
         "model": DOUBAO_MODEL,
         "prompt": req.prompt,
@@ -308,19 +582,29 @@ async def generate_image(req: ImageRequest):
         "Content-Type": "application/json",
     }
     
+    t0 = __import__("time").time()
     async with httpx.AsyncClient(timeout=120) as client:
-        resp = await client.post(
-            f"{DOUBAO_BASE}/images/generations",
-            headers=headers,
-            json=payload,
-        )
-        
+        try:
+            resp = await client.post(
+                f"{DOUBAO_BASE}/images/generations",
+                headers=headers,
+                json=payload,
+            )
+        except httpx.HTTPError as e:
+            # 超时/断网：云端可能已生成并计费，但本地拿不到图——记下来便于和方舟账单对账
+            log_prompt("生图超时/中断(云端可能已计费)", f"{type(e).__name__}: {e}", f"耗时{__import__('time').time()-t0:.0f}s")
+            raise HTTPException(504, f"生图请求超时或中断（云端可能已计费）：{type(e).__name__}，请稍后再试")
+
         if resp.status_code != 200:
             print("\n❌ 豆包 API 报错详情:", resp.text, "\n")
+            log_prompt("生图失败", resp.text[:300], f"HTTP {resp.status_code} 耗时{__import__('time').time()-t0:.0f}s")
             raise HTTPException(resp.status_code, f"豆包生图失败：{resp.text}")
-            
+
         data = resp.json()
         b64_data = data["data"][0]["b64_json"]
+        # 记录豆包实际返回几张（确认是否存在"生成了多张但只显示一张"的情况）
+        print(f"🖼️ 豆包本次返回图片数: {len(data.get('data', []))}")
+        log_prompt("生图成功", f"返回{len(data.get('data', []))}张，耗时{__import__('time').time()-t0:.0f}s")
         img_bytes = base64.b64decode(b64_data)
         
         filename = f"img_{uuid.uuid4().hex}.jpg"
@@ -430,6 +714,51 @@ async def generate_video(req: VideoRequest):
     else:
         frame_mode = "reference"
 
+    target_workflow = req.workflow_id if req.workflow_id else AUTODL_WORKFLOW
+
+    # ---------- 按参考图宽高比自动选横/竖屏档位 ----------
+    # H3 系工作流默认档是竖屏（如 768p竖=768×1344），横屏参考图不改档位就会输出竖屏视频。
+    # AutoDL 工作流详情接口（/api/v1/comfyui/workflows/{id}）的 input_rules 里有 resolution
+    # 参数的官方枚举（如 "480p竖/480p横/480p(1:1)/768p竖/768p横/768p(1:1)"），据此选档最可靠。
+    _workflow_res_cache: dict = {}
+    async def get_resolution_options(client, headers):
+        if target_workflow in _workflow_res_cache:
+            return _workflow_res_cache[target_workflow]
+        try:
+            r = await client.get(f"{AUTODL_BASE}/api/v1/comfyui/workflows/{target_workflow}", headers=headers)
+            data = (r.json() or {}).get("data") or {}
+            rules = data.get("input_rules") or {}
+            options = [o.get("label") for o in ((rules.get("resolution") or {}).get("options") or []) if o.get("label")]
+            print(f"📋 工作流 {target_workflow} 支持 resolution 档位: {options or '（无此参数，用默认档）'}")
+        except Exception as e:
+            print(f"⚠️ 查询工作流 {target_workflow} 参数失败（不影响提交）: {type(e).__name__}: {e}")
+            options = []
+        _workflow_res_cache[target_workflow] = options
+        return options
+
+    def pick_resolution(options: list, aspect) -> str | None:
+        """横图选"横"档，竖图选"竖"档，方图选"(1:1)"档；同方向优先 768p，其次 480p。"""
+        if not options:
+            return None
+        want = None
+        if aspect:
+            if aspect > 1.05: want = "横"
+            elif aspect < 0.95: want = "竖"
+            else: want = "(1:1)"
+        if want:
+            for tier in ("768p", "480p"):
+                for o in options:
+                    if tier in o and want in o:
+                        return o
+            for o in options:  # 方向命中但档位不全时，取该方向任意档
+                if want in o:
+                    return o
+        # 拿不到宽高比时回退 768p竖（与工作流默认一致，避免误选 480p 降画质）
+        for o in options:
+            if "768p" in o:
+                return o
+        return options[0]
+
     # 首尾帧应用(U02)可能使用独立令牌：配置了 AUTODL_I2V_TOKEN 且非参考模式时用它
     use_i2v_token = frame_mode != "reference" and AUTODL_I2V_TOKEN.strip()
     headers = {
@@ -446,7 +775,7 @@ async def generate_video(req: VideoRequest):
         def to_val(url: str) -> str:
             return local_url_to_data_uri(url) if "/static/" in url else url
 
-        def build_payload(put_first: bool, put_last: bool) -> dict:
+        def build_payload(put_first: bool, put_last: bool, resolution: str | None = None) -> dict:
             p = {"prompt": req.prompt, "duration": req.duration}
             if frame_mode == "reference":
                 for i, url in enumerate(req.image_urls[:9]):
@@ -456,11 +785,17 @@ async def generate_video(req: VideoRequest):
                     p["first_frame"] = to_val(req.first_frame_url)
                 if put_last and req.last_frame_url:
                     p["last_frame"] = to_val(req.last_frame_url)
-            # 注意：minimax_h3_zm 系列工作流不接受 resolution 参数（用工作流默认档位），
-            # 传了会报 RequestParameterIsWrong，故不发送 req.resolution。
+            # resolution 档位（含横竖屏）：仅在查询到工作流支持该参数时才发送；
+            # zm 系列老工作流不接受 resolution（传了报 RequestParameterIsWrong），保持默认档
+            if resolution:
+                p["resolution"] = resolution
             return p
 
         target_workflow = req.workflow_id if req.workflow_id else AUTODL_WORKFLOW
+        res_options = await get_resolution_options(client, headers)
+        chosen_res = pick_resolution(res_options, req.image_aspect)
+        if chosen_res:
+            print(f"🖼️ 参考图宽高比={req.image_aspect} → 自动选择 resolution 档位: {chosen_res}")
 
         async def submit(pl: dict):
             # 网络瞬断容错：自动重试 2 次，仍失败才报错（避免偶发 httpx.ReadError 直接 500）
@@ -479,17 +814,26 @@ async def generate_video(req: VideoRequest):
             raise HTTPException(503, f"连接 AutoDL 失败（网络瞬断，已重试 3 次）：{type(last_exc).__name__}，请稍后再试")
 
         if frame_mode == "reference":
-            payload = build_payload(False, False)
+            payload = build_payload(False, False, chosen_res)
         elif frame_mode == "first":
-            payload = build_payload(True, False)   # 只传首帧
+            payload = build_payload(True, False, chosen_res)   # 只传首帧
         elif frame_mode == "last":
-            payload = build_payload(False, True)   # 只传尾帧
+            payload = build_payload(False, True, chosen_res)   # 只传尾帧
         else:
-            payload = build_payload(True, True)    # 首尾帧过渡
-        print(f"📤 提交给 AutoDL: workflow={target_workflow}, 模式={frame_mode}, 图数量={len(req.image_urls[:9])}")
+            payload = build_payload(True, True, chosen_res)    # 首尾帧过渡
+        print(f"📤 提交给 AutoDL: workflow={target_workflow}, 模式={frame_mode}, 图数量={len(req.image_urls[:9])}, resolution={chosen_res or '默认'}")
+        print(f"📝 视频提示词: {req.prompt[:200]}{'…' if len(req.prompt) > 200 else ''}")
+        log_prompt("生视频", req.prompt, f"workflow={target_workflow} 模式={frame_mode} duration={req.duration} resolution={chosen_res or '默认'}")
 
         resp = await submit(payload)
         data = resp.json() if resp.status_code == 200 else {}
+        # 该工作流若不接受 resolution 参数（RequestParameterIsWrong 且提到 resolution），去掉后原样重试
+        if chosen_res and data.get("code") == "RequestParameterIsWrong" and "resolution" in (data.get("msg") or ""):
+            print("🔄 工作流不接受 resolution 参数，去掉该参数重试（使用工作流默认档位）")
+            chosen_res = None
+            payload = build_payload(frame_mode in ("first", "first_last"), frame_mode in ("last", "first_last"))
+            resp = await submit(payload)
+            data = resp.json() if resp.status_code == 200 else {}
         # 首尾帧工作流文档要求 first_frame/last_frame 都必填：
         # 单帧模式若平台报"缺少必填参数"，用同一张分镜图补上另一帧重试（起点=终点，画面从图出发再回到图）
         if frame_mode in ("first", "last", "first_last") and data.get("code") == "RequestParameterIsWrong" \
@@ -501,7 +845,7 @@ async def generate_video(req: VideoRequest):
                 req.last_frame_url = req.first_frame_url
             if not req.first_frame_url:
                 req.first_frame_url = req.last_frame_url
-            payload = build_payload(True, True)
+            payload = build_payload(True, True, chosen_res)
             resp = await submit(payload)
             data = resp.json() if resp.status_code == 200 else {}
         # 兜底：若参数名不被接受（报未定义参数），改用 ref_image_0 再试一次
@@ -509,6 +853,8 @@ async def generate_video(req: VideoRequest):
                 and "未定义的参数" in (data.get("msg") or ""):
             print("🔄 first_frame/last_frame 参数名不被接受，改用 ref_image_0 重试")
             payload = {"prompt": req.prompt, "duration": req.duration}
+            if chosen_res:
+                payload["resolution"] = chosen_res
             for i, url in enumerate(req.image_urls[:9]):
                 payload[f"ref_image_{i}"] = to_val(url)
             resp = await submit(payload)
@@ -739,6 +1085,79 @@ async def update_settings(req: SettingsRequest):
         _write_env_file(updates)
         print(f"⚙️ 设置已更新并写入 .env: {list(updates.keys())}")
     return {"saved": True, "updated": list(updates.keys())}
+
+# ---------- 项目导出/导入：项目 JSON + 引用到的 static/uploads 媒体文件打包成 zip ----------
+class ExportProjectRequest(BaseModel):
+    name: str = "未命名项目"
+    data: Dict[str, Any]
+
+def _collect_upload_refs(obj: Any, found: set) -> None:
+    """递归收集项目数据里引用的所有 /static/uploads/ 文件名。"""
+    if isinstance(obj, str):
+        for m in re.findall(r"/static/uploads/([A-Za-z0-9_.\-]+)", obj):
+            found.add(m)
+    elif isinstance(obj, dict):
+        for v in obj.values():
+            _collect_upload_refs(v, found)
+    elif isinstance(obj, list):
+        for v in obj:
+            _collect_upload_refs(v, found)
+
+@app.post("/api/export-project")
+async def export_project(req: ExportProjectRequest):
+    blob = json.dumps(req.data, ensure_ascii=False)
+    found: set = set()
+    _collect_upload_refs(req.data, found)
+    packed = 0
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("project.json", blob)
+        for name in sorted(found):
+            # 防路径穿越：只要纯文件名
+            safe_name = os.path.basename(name)
+            p = os.path.join("static", "uploads", safe_name)
+            if safe_name and os.path.isfile(p):
+                zf.write(p, f"uploads/{safe_name}")
+                packed += 1
+    buf.seek(0)
+    safe_stem = re.sub(r'[\\/:*?"<>|\s]+', "_", req.name).strip("_") or "project"
+    filename = f"{safe_stem}.aianime.zip"
+    print(f"📤 导出项目「{req.name}」：媒体文件 {packed} 个，包大小 {buf.getbuffer().nbytes / 1024 / 1024:.1f} MB")
+    return Response(
+        content=buf.getvalue(),
+        media_type="application/zip",
+        headers={"Content-Disposition": f"attachment; filename=\"export.aianime.zip\"; filename*=UTF-8''{quote(filename)}"},
+    )
+
+@app.post("/api/import-project")
+async def import_project(file: UploadFile = File(...)):
+    try:
+        zf = zipfile.ZipFile(io.BytesIO(await file.read()))
+    except zipfile.BadZipFile:
+        raise HTTPException(400, "不是有效的项目导出包（应为 .aianime.zip）")
+    with zf:
+        names = zf.namelist()
+        if "project.json" not in names:
+            raise HTTPException(400, "导出包缺少 project.json，无法导入")
+        try:
+            project = json.loads(zf.read("project.json").decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            raise HTTPException(400, "project.json 解析失败，导出包可能已损坏")
+        if not isinstance(project, dict):
+            raise HTTPException(400, "project.json 结构异常，无法导入")
+        restored = 0
+        for n in names:
+            if n.startswith("uploads/") and not n.endswith("/"):
+                fn = os.path.basename(n)  # 防路径穿越，只取纯文件名
+                if not fn or fn != n.split("/", 1)[1]:
+                    continue
+                dst = os.path.join("static", "uploads", fn)
+                if not os.path.exists(dst):  # 同名文件已存在则跳过，不覆盖
+                    with open(dst, "wb") as f:
+                        f.write(zf.read(n))
+                    restored += 1
+    print(f"📥 导入项目「{project.get('name', '')}」：恢复媒体文件 {restored} 个")
+    return {"project": project, "restored_files": restored}
 
 # ---------- 前端页面响应头：禁止缓存 index.html，避免浏览器用旧页面看不到新功能 ----------
 @app.middleware("http")

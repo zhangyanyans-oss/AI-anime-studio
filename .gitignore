@@ -16,6 +16,8 @@ static/uploads/
 static/temp/
 static/local_edit/
 exe_test.log
+.verify.log
+debug_prompts.log
 
 # WPS 本地编辑注入的辅助文件（非项目本体）
 static/wps-edit.js
