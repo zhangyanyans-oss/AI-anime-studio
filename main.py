@@ -818,9 +818,12 @@ def _facing_relative_to_camera(pf: float, vx: float, vy: float, dist: float, cam
     return "侧对镜头、面朝画面右" if side_dot > 0 else "侧对镜头、面朝画面左"
 
 
-def format_plot_to_prompt(plot: dict) -> str:
-    """把调度图精准坐标数据翻译成生图模型听得懂的自然语言（注入 prompt 尾部）。
-    生图模型读不懂白底俯视图上的圆点与扇形，但读得懂"谁离镜头最近、在画面哪一侧"。"""
+def format_plot_to_prompt(plot: dict, dynamic: bool = False) -> str:
+    """把调度图精准坐标数据翻译成生图/生视频模型听得懂的自然语言（注入 prompt 尾部）。
+    生图模型读不懂白底俯视图上的圆点与扇形，但读得懂"谁离镜头最近、在画面哪一侧"。
+    dynamic=False（分镜图）：名单描述初始帧＝全部画面，视野外角色绝对禁足；
+    dynamic=True（生视频）：名单只约束0秒初始帧，之后谁入画由走位与镜头运动推演——
+    走向镜头外的人、镜头跟随都可能让视野外的人自然入画，不能一刀切禁足。"""
     import math
     if not isinstance(plot, dict):
         return ""
@@ -875,22 +878,43 @@ def format_plot_to_prompt(plot: dict) -> str:
         edge = "、靠近视野边缘可能被画面裁切" if angle and angle > fov / 2 + 10 else ""
         seg.append(f"{name}（{vert}、{depth}、{desc}{edge}）")
     if seg:
-        lines.append("【人物站位·入画名单（从近到远）】（本名单中的「画面左/右」＝成片图像里观众看到的左/右，"
+        title = "【人物站位·初始画面入画名单（0秒时刻，从近到远）】" if dynamic else "【人物站位·入画名单（从近到远）】"
+        lines.append(title + "（本名单中的「画面左/右」＝成片图像里观众看到的左/右，"
                      "已按机位朝向换算，与图纸方位无关）" + "；".join(seg) + "。")
     else:
         lines.append("【人物站位】机位前方视野内没有人物，画面以环境空镜为主。")
     if hidden:
-        lines.append("【人物站位·绝不入画名单】" + "；".join(f"{m[0]}（{m[4]}）" for m in hidden) + "。")
-    lines.append("【透视规则】离机位越近的人画面里越大（可为前景，可能只露腿部/肩膀/背影），越远越小、靠近地平线；"
-                 "同一地面人物身高一致，纵深相近者大小相近。"
-                 "每个人物的身体朝向以上述描述为准（面向镜头＝正脸朝观众，背对镜头＝只见背影，侧对镜头＝按写明的画面左右侧脸），"
-                 "文字提示词中的朝向描述（如'面朝XX方向''看画面的对侧''望向XX'）若与本名单冲突，一律作废、按本名单执行。"
-                 "镜头就是对准入画名单里的人拍的：离镜头最近的主体应按景别呈现在镜头前方（构图围绕该主体），"
-                 "写'面向镜头'的主体必须正脸朝向镜头，严禁把他挪到画面边缘、画成侧脸、或把画面取成顺着他视线望出去的方向。"
-                 "上面两个名单由程序按坐标计算，是权威事实："
-                 "绝不入画名单里的人禁止出现在画面中，即使文字提示词提到了他们。"
-                 "每个角色在画面中只出现一次、只有一个身体：走位描述的是同一角色的位移，严禁画成分身、复制人或两个同名角色；"
-                 "俯视调度图纸/轨迹图类参考图仅用于确定站位与走位，严禁把图纸、人偶棋子图标、扇形视锥画进画面。")
+        if dynamic:
+            # 视频：名单只约束初始帧。走位/镜头运动可能把视野外的人带进画面，不能一刀切禁足
+            hidden_desc = []
+            for m in hidden:
+                d = (m[4].replace("（就在镜头旁边，不入画）", "（就在镜头旁边）")
+                         .replace("（镜头后方，不入画）", "（镜头后方）")
+                         .replace("（不入画）", ""))
+                hidden_desc.append(f"{m[0]}（初始画面不在镜头视野内：{d}）")
+            lines.append("【人物站位·初始不在画面名单（0秒时刻）】" + "；".join(hidden_desc) + "。")
+        else:
+            lines.append("【人物站位·绝不入画名单】" + "；".join(f"{m[0]}（{m[4]}）" for m in hidden) + "。")
+    if dynamic:
+        lines.append("【透视规则·视频】离机位越近的人画面里越大（可为前景，可能只露腿部/肩膀/背影），越远越小、靠近地平线；"
+                     "同一地面人物身高一致，纵深相近者大小相近。"
+                     "以上两个名单描述的都是0秒初始画面的状态，不约束后续：初始在画面里的人物按上述站位出现；"
+                     "初始不在画面的人物，若走位或镜头运动使其进入机位视野，则按真实透视自然走入画面（入画的就是本人，从画面边缘进来），"
+                     "始终未进入视野的则全程不得出现、严禁凭空冒出。人物进出场只以走位与镜头运动为准。"
+                     "每个人物的身体朝向按名单描述执行（面向镜头＝正脸朝观众，背对镜头＝只见背影，侧对镜头＝按写明的画面左右侧脸）。"
+                     "每个角色在画面中只出现一次、只有一个身体：走位描述的是同一角色的位移，严禁画成分身、复制人或两个同名角色；"
+                     "俯视调度图纸/轨迹图类参考图仅用于确定站位与走位，严禁把图纸、人偶棋子图标、扇形视锥画进画面。")
+    else:
+        lines.append("【透视规则】离机位越近的人画面里越大（可为前景，可能只露腿部/肩膀/背影），越远越小、靠近地平线；"
+                     "同一地面人物身高一致，纵深相近者大小相近。"
+                     "每个人物的身体朝向以上述描述为准（面向镜头＝正脸朝观众，背对镜头＝只见背影，侧对镜头＝按写明的画面左右侧脸），"
+                     "文字提示词中的朝向描述（如'面朝XX方向''看画面的对侧''望向XX'）若与本名单冲突，一律作废、按本名单执行。"
+                     "镜头就是对准入画名单里的人拍的：离镜头最近的主体应按景别呈现在镜头前方（构图围绕该主体），"
+                     "写'面向镜头'的主体必须正脸朝向镜头，严禁把他挪到画面边缘、画成侧脸、或把画面取成顺着他视线望出去的方向。"
+                     "上面两个名单由程序按坐标计算，是权威事实："
+                     "绝不入画名单里的人禁止出现在画面中，即使文字提示词提到了他们。"
+                     "每个角色在画面中只出现一次、只有一个身体：走位描述的是同一角色的位移，严禁画成分身、复制人或两个同名角色；"
+                     "俯视调度图纸/轨迹图类参考图仅用于确定站位与走位，严禁把图纸、人偶棋子图标、扇形视锥画进画面。")
 
     # 运动路线（轨迹图）：拐点翻译成镜头相对方向（往画面哪边走、靠近/远离镜头），不甩裸坐标
     cam_facing = float(cam.get("facing") or 0)
@@ -924,6 +948,7 @@ def format_plot_to_prompt(plot: dict) -> str:
         return "纵深基本持平"
 
     moves = []
+    hidden_names = {m[0] for m in hidden}  # 机位几何判定不入画的角色名
     for c in chars:
         path = c.get("path") or []
         if not (path and str(c.get("name")).strip()):
@@ -941,6 +966,28 @@ def format_plot_to_prompt(plot: dict) -> str:
         stops = [s for s in (c.get("stops") or []) if isinstance(s, dict) and (str(s.get("action") or "").strip() or str(s.get("t") or "").strip())]
         if stops:
             desc += "；时间节点：" + "→".join(f"{str(s.get('t') or '').strip()}{str(s.get('action') or '').strip()}".strip() for s in stops)
+        # 走位终点/时间节点点名了"不入画"角色时必须显式声明：只表示朝那个方向走，
+        # 否则视频模型为了表现"走到XX附近"会把镜头外的人画进画面（实测导致大量人物崩坏）
+        who = set()
+        ex, ey = pts[-1]
+        for o in chars:
+            on = str(o.get("name") or "").strip()
+            if not on or on == str(c.get("name")).strip() or on not in hidden_names:
+                continue
+            if math.hypot(float(o.get("x") or 0) - ex, float(o.get("y") or 0) - ey) < 0.12:
+                who.add(on)
+            for s in stops:
+                if on in str(s.get("action") or ""):
+                    who.add(on)
+        if who:
+            names_txt = "、".join(sorted(who))
+            if dynamic:
+                desc += (f"（注意：{names_txt}初始画面不在镜头视野内——上述走位只表示朝{names_txt}所在的方向走去，"
+                         f"若走位或镜头运动使其进入视野则按真实透视自然入画（入画即本人，从画面边缘进来），"
+                         f"始终未进入视野则不得凭空出现）")
+            else:
+                desc += (f"（注意：{names_txt}按机位视野计算不在画面内——上述走位只表示朝{names_txt}所在的方向走去，"
+                         f"走到画面边缘或纵深方向即可，{names_txt}本人不得出现在画面中）")
         moves.append(desc)
     cam_path = cam.get("path") or []
     if cam_path:
@@ -1779,10 +1826,15 @@ async def generate_video(req: VideoRequest):
 
     # 运动轨迹指令：调度图纸（俯视/轨迹）坐标翻译成自然语言，与参考图一起约束视频的人物走位与镜头运动
     prompt = req.prompt
+    # 时长校正：动作时序文案是建分镜时按当时的时长生成的，导演后来改了时长也不会重写——
+    # 发视频时按实际时长重申时间轴，避免"总时长3秒"配7秒成片导致动作节奏错乱
+    if req.duration and req.duration > 0:
+        prompt += f"\n【时长校正】本视频实际总时长为 {req.duration} 秒：若上方动作时序写明的总时长与此不符，按 {req.duration} 秒重新匀排各动作节点，禁止提前结束或超时。"
     if req.plot_data:
-        plot_txt = format_plot_to_prompt(req.plot_data)
+        # dynamic=True：名单只约束初始帧，后续人物进出场按走位与镜头运动推演（视频有时间轴，与单帧分镜图不同）
+        plot_txt = format_plot_to_prompt(req.plot_data, dynamic=True)
         if plot_txt:
-            prompt = (f"{req.prompt}\n\n【运动轨迹指令】（由导演定稿的调度图纸坐标翻译而来，"
+            prompt = (f"{prompt}\n\n【运动轨迹指令】（由导演定稿的调度图纸坐标翻译而来，"
                       f"人物走位、运动快慢、身体朝向与镜头运动必须严格遵守）\n{plot_txt}\n"
                       "【身份唯一规则】画面中每个角色全程只有一个身体、一份存在：上述走位是画面中已有角色的连续位移，"
                       "不是新角色入场；严禁出现复制人、分身、双胞胎——比如出现两个憨憨相向而行、一个走近镜头另一个还站在原地，都是错误；"
