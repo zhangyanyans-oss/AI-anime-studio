@@ -307,7 +307,7 @@
                 <h2>视频生成</h2>
                 <div id="videoPreview" class="video-preview"></div>
                 <div id="videoLog" class="hint"></div>
-                <h2 style="margin-top:24px;">📁 已保存的视频 <span class="hint" style="display:inline; font-weight:normal;">(按项目归类展示；点「删除」会同时删掉本地文件，腾出磁盘空间)</span></h2>
+                <h2 style="margin-top:24px;">📁 本项目的视频 <span class="hint" style="display:inline; font-weight:normal;">(只显示当前项目的视频；点「删除」会同时删掉本地文件，腾出磁盘空间)</span></h2>
                 <div id="videoGallery"></div>
             </div>
         </div>
@@ -2267,26 +2267,20 @@
                     g.innerHTML = `<span class="hint">还没有保存的视频，生成分镜图后点「生成视频」试试</span>`;
                     return;
                 }
-                // 建立 视频文件 → 所属项目 的映射：每个项目的分镜都记录着自己的 videoUrl
-                const owner = {}; // 文件名 -> 项目名
+                // 视频文件 → 所属项目（每个项目的分镜都记录着自己的 videoUrl）
+                const owner = {}; // 文件名 -> 项目id
                 (projects || []).forEach(p => {
                     (((p.storyData || {}).storyboards) || []).forEach(sb => {
                         if (!sb.videoUrl) return;
                         const fname = String(sb.videoUrl).split("/").pop().split("?")[0];
-                        if (fname && !owner[fname]) owner[fname] = p.name || "未命名项目";
+                        if (fname && !owner[fname]) owner[fname] = p.id;
                     });
                 });
-                // 按项目分组（后端已按时间倒序，组内保持新→旧）
-                const groups = new Map();
-                const orphans = [];
+                // 资产只在对应的项目里出现：画廊仅展示当前项目的视频
+                const mine = [], orphans = [];
                 data.videos.forEach(v => {
-                    const proj = owner[v.name];
-                    if (proj) {
-                        if (!groups.has(proj)) groups.set(proj, []);
-                        groups.get(proj).push(v);
-                    } else {
-                        orphans.push(v);
-                    }
+                    if (owner[v.name] === currentProjectId) mine.push(v);
+                    else if (!owner[v.name]) orphans.push(v); // 不属于任何项目的旧文件
                 });
                 const card = v => `
                     <div style="display:inline-block; margin:0 12px 12px 0; background:#f9fafb; border:1px solid var(--border-color); border-radius:10px; padding:12px; vertical-align:top; position:relative;">
@@ -2296,12 +2290,16 @@
                         <a class="btn-download" href="${v.url}" download="${v.name}" style="display:inline-block; text-decoration:none; margin-top:8px;">📥 保存到电脑</a>
                     </div>`;
                 let html = "";
-                const renderGroup = (title, vids, color) => {
-                    html += `<div style="margin:14px 0 6px; font-size:15px; font-weight:700; color:${color};">📂 ${escapeAttr(title)} <span class="hint" style="display:inline; font-weight:normal;">(${vids.length} 个视频)</span></div>`;
-                    html += vids.map(card).join('');
-                };
-                groups.forEach((vids, name) => renderGroup(name, vids, "#1d4ed8"));
-                if (orphans.length) renderGroup("未归属（旧视频或未关联到分镜）", orphans, "#92400e");
+                if (mine.length) {
+                    html += `<div style="margin:0 0 8px; font-size:15px; font-weight:700; color:#1d4ed8;">📂 本项目视频 <span class="hint" style="display:inline; font-weight:normal;">(${mine.length})</span></div>` + mine.map(card).join('');
+                } else {
+                    html += `<span class="hint">本项目还没有视频，生成分镜视频后会出现在这里（其他项目的视频不会混进来）</span>`;
+                }
+                // 未归属旧文件不掺进项目列表，折叠收起、可展开管理（删除可腾磁盘）
+                if (orphans.length) {
+                    const mb = orphans.reduce((s, v) => s + (v.size_mb || 0), 0).toFixed(0);
+                    html += `<details style="margin-top:10px;"><summary class="hint" style="cursor:pointer;">🗃 另有 ${orphans.length} 个未归属任何项目的旧视频文件（约 ${mb}MB），点开管理</summary><div style="margin-top:8px;">${orphans.map(card).join('')}</div></details>`;
+                }
                 g.innerHTML = html;
             } catch (e) { /* 忽略画廊加载失败 */ }
         }
