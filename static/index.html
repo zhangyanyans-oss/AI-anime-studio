@@ -474,6 +474,9 @@
                 document.getElementById("videoLog").textContent = "⏳ 检测到进行中的视频任务，正在恢复进度查询…";
                 pollVideo(vt.taskId);
             }
+
+            // 切换项目后刷新视频画廊：资产只在所属项目里显示，防止显示成上一个项目的视频
+            loadVideoGallery();
         }
 
         function initProjects() {
