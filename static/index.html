@@ -205,6 +205,7 @@
                     <button onclick="toggleBrainstorm()" class="btn-purple">💡 灵感头脑风暴</button>
                     <input type="file" id="mainImageInput" accept="image/*" onchange="handleMainImageSelect(event)" style="display:none;">
                     <input type="file" id="sbImageUploadInput" accept="image/*" onchange="handleSbImageUpload(event)" style="display:none;">
+                    <input type="file" id="diagramUploadInput" accept="image/*" onchange="handleDiagramUpload(event)" style="display:none;">
                     <label for="mainImageInput" class="label-upload">📎 传图</label>
                 </div>
                 <span id="storyStatus" class="hint"></span>
@@ -272,6 +273,21 @@
                 <button class="btn-add" onclick="addNewItem('scene')">+ 添加新场景</button>
             </div>
 
+            <div id="propsSection" class="section hidden">
+                <h2>道具参考图</h2>
+                <div style="margin-bottom: 10px;">
+                    <span class="hint" style="display:inline;">图片比例：</span>
+                    <select id="propAspectSelect" onchange="saveCurrentProject()" style="padding:4px 8px;">
+                        <option value="square">方形 1:1（道具特写，推荐）</option>
+                        <option value="portrait">竖屏 9:16</option>
+                        <option value="landscape">横屏 16:9</option>
+                    </select>
+                    <span class="hint" style="display:inline;">对剧情有意义的道具单独出设定图（信物、钥匙、武器等）；分镜图会自动参考它们，保持道具长相一致。</span>
+                </div>
+                <div id="propsGrid" class="card-grid"></div>
+                <button class="btn-add" onclick="addNewItem('prop')">+ 添加新道具</button>
+            </div>
+
             <div id="storyboardsSection" class="section hidden">
                 <h2>分镜制作 <span class="hint" style="display:inline; font-weight:normal;">(按住左侧 ⋮⋮ 拖拽)</span></h2>
                 <div style="margin-bottom: 10px;">
@@ -291,7 +307,7 @@
                 <h2>视频生成</h2>
                 <div id="videoPreview" class="video-preview"></div>
                 <div id="videoLog" class="hint"></div>
-                <h2 style="margin-top:24px;">📁 已保存的视频 <span class="hint" style="display:inline; font-weight:normal;">(自动保存到本地，永久有效)</span></h2>
+                <h2 style="margin-top:24px;">📁 已保存的视频 <span class="hint" style="display:inline; font-weight:normal;">(按项目归类展示；点「删除」会同时删掉本地文件，腾出磁盘空间)</span></h2>
                 <div id="videoGallery"></div>
             </div>
         </div>
@@ -373,6 +389,7 @@
             currentData.imageAspect = document.getElementById("aspectSelect").value;
             currentData.charAspect = document.getElementById("charAspectSelect").value;
             currentData.sceneAspect = document.getElementById("sceneAspectSelect").value;
+            currentData.propAspect = document.getElementById("propAspectSelect").value;
             currentData.idea = document.getElementById("ideaInput").value;
 
             let dataToSave = JSON.parse(JSON.stringify(currentData));
@@ -418,6 +435,7 @@
             document.getElementById("aspectSelect").value = currentData.imageAspect || "portrait";
             document.getElementById("charAspectSelect").value = currentData.charAspect || "portrait";
             document.getElementById("sceneAspectSelect").value = currentData.sceneAspect || "portrait";
+            document.getElementById("propAspectSelect").value = currentData.propAspect || "square";
             const modeRadio = document.querySelector(`input[name="videoMode"][value="${currentData.videoMode || "reference"}"]`);
             if (modeRadio) modeRadio.checked = true;
             if (currentData.videoDuration) document.getElementById("videoDurationInput").value = currentData.videoDuration;
@@ -580,7 +598,7 @@
         }
 
         function hideStorySections() {
-            ['storySection', 'charactersSection', 'scenesSection', 'storyboardsSection', 'videoSection'].forEach(id => document.getElementById(id).classList.add("hidden"));
+            ['storySection', 'charactersSection', 'scenesSection', 'propsSection', 'storyboardsSection', 'videoSection'].forEach(id => document.getElementById(id).classList.add("hidden"));
         }
 
         // ================= 图片处理 =================
@@ -836,11 +854,12 @@
         }
 
         async function genImage(type, indexOrId) {
-            let slotId, prompt;
+            let slotId, prompt, sbItem = null;
             if (type === 'char') { slotId = `char-img-${indexOrId}`; prompt = document.getElementById(`char-prompt-${indexOrId}`).value; }
             else if (type === 'scene') { slotId = `scene-img-${indexOrId}`; prompt = document.getElementById(`scene-prompt-${indexOrId}`).value; }
+            else if (type === 'prop') { slotId = `prop-img-${indexOrId}`; prompt = document.getElementById(`prop-prompt-${indexOrId}`).value; }
             else if (type === 'sb') {
-                const sbItem = currentData.storyData.storyboards.find(s => s._id === indexOrId);
+                sbItem = currentData.storyData.storyboards.find(s => s._id === indexOrId);
                 if (!sbItem) return;
                 slotId = `sb-img-${indexOrId}`; prompt = sbItem.edited_prompt || sbItem.image_prompt || sbItem.description;
             }
@@ -851,13 +870,44 @@
             const addRef = (url, kind, name, description) => {
                 if (url) { referenceUrls.push(url); referenceMeta.push({ kind, name: name || "", description: description || "" }); }
             };
+            const addPropRefs = () => {
+                (currentData.storyData.props || []).forEach((p, i) => addRef(p.imgSrc || currentData.images[`prop-${i}`], "prop", p.name, p.description));
+            };
             if (type === 'sb') {
-                // 候选参考：全部角色图 + 全部场景图（带元数据），由后端按分镜内容智能筛选相关的
+                // 调度图最高优先级：一旦生成即视为导演定稿，排在参考列表最前，
+                // 后端强制"人物位置/走位轨迹/机位轨迹以调度图为准"，优先级高于文字提示词
+                if (sbItem && sbItem.topView) {
+                    const anns = [];
+                    anns.push("本图是导演定稿的调度图纸：正上方俯视平面图，人偶棋子图标＝人物（标签为人名），「机位」符号＝摄影机位置，虚线箭头＝运动路线。");
+                    if (sbItem.topViewFrame) anns.push("导演已用红框标出本分镜的取景范围，红框外区域已压暗：压暗区域里的人与景原则上不进入画面；红框内入画、框边可裁切。红框与机位真实视野冲突时，以机位与物理透视为准，红框只作构图参考。");
+                    if (sbItem.topViewCam) {
+                        if (sbItem.topViewCamSummary) anns.push(sbItem.topViewCamSummary);
+                        else {
+                            const dirs = ["上方", "右上方", "右方", "右下方", "下方", "左下方", "左方", "左上方"];
+                            const f = sbItem.topViewCam.facing;
+                            const dname = (f == null) ? "原朝向" : ("图纸" + dirs[Math.round(f / 45) % 8] + "方向");
+                            anns.push(`导演已手动标注机位：机位在图纸 (${sbItem.topViewCam.x.toFixed(2)}, ${sbItem.topViewCam.y.toFixed(2)}) 处、朝${dname}拍摄（图中📷即为机位）。机位视角占主导：观察点就在该机位处、朝拍摄方向看。机位落在谁身上，谁就是视角人物（镜头从他眼中拍出），与机位身后的人一起不入画；机位视线前方的人按物理透视正常入画（可为前景、可能只露部分身体）。人物远近与左右一律从该机位换算。`);
+                        }
+                    }
+                    const topUrl = (sbItem.topViewFrame || sbItem.topViewCam) ? await topViewAnnotated(sbItem.topView, sbItem) : sbItem.topView;
+                    addRef(topUrl, "diagram", "俯视调度图", ((sbItem.topViewDesc || "").trim() + " " + anns.join(" ")).trim());
+                }
+                if (sbItem && sbItem.trajView) addRef(sbItem.trajView, "diagram", "轨迹调度图", ((sbItem.trajViewDesc || "").trim() + " 本图是导演定稿的运动轨迹图纸：正上方俯视平面图，彩色实线箭头＝人物运动轨迹（含时间刻度与动作节点），黑色虚线箭头＝机位移动轨迹，「机位」符号＝摄影机起点。").trim());
+                // 候选参考：全部角色图 + 全部场景图 + 全部道具图（带元数据），由后端按分镜内容智能筛选相关的
                 (currentData.storyData.characters || []).forEach((c, i) => addRef(c.imgSrc || currentData.images[`char-${i}`], "character", c.name, c.description));
                 (currentData.storyData.scenes || []).forEach((s, i) => addRef(s.imgSrc || currentData.images[`scene-${i}`], "scene", s.name, s.description));
+                addPropRefs();
             } else if (type === 'scene') {
-                // 场景参考图也参考已生成的角色图：人物长相、服装、画风保持一致
-                (currentData.storyData.characters || []).forEach((c, i) => addRef(c.imgSrc || currentData.images[`char-${i}`], "character", c.name, c.description));
+                // 场景设定图是空镜（规范：画面中无人物）：不发角色参考图——
+                // 生图模型看到角色参考图就会把人画进空镜，提示词写"无人物"也拗不过参考图；
+                // 道具图只发场景提示词里点名的道具，避免无关道具被参考图"塞"进画面
+                const scenePromptText = (prompt || "");
+                (currentData.storyData.props || []).forEach((p, i) => {
+                    const nm = (p.name || "").trim();
+                    if (nm && nm.length >= 2 && scenePromptText.includes(nm)) {
+                        addRef(p.imgSrc || currentData.images[`prop-${i}`], "prop", p.name, p.description);
+                    }
+                });
             }
 
             // 生图进度条：动画条 + 已等待秒数
@@ -875,11 +925,30 @@
                 // 图片比例按各自区域的选择：角色/场景/分镜各自独立，互不影响
                 // 竖屏与视频输出(768x1344)匹配，避免视频重构图裁切变形
                 const sizeMap = { portrait: "1080x1920", square: "2048x2048", landscape: "1920x1080" };
-                const aspectSel = type === 'char' ? "charAspectSelect" : (type === 'scene' ? "sceneAspectSelect" : "aspectSelect");
+                const aspectSel = type === 'char' ? "charAspectSelect" : (type === 'scene' ? "sceneAspectSelect" : (type === 'prop' ? "propAspectSelect" : "aspectSelect"));
                 const aspect = (document.getElementById(aspectSel) || {}).value || "portrait";
+                // 有调度图时，先把口述解读成"人物近/中/远景纵深说明"，解决俯视图→画面的远近换算问题
+                let diagramBrief = null;
+                if (type === 'sb' && sbItem && (sbItem.topView || sbItem.trajView)) {
+                    try {
+                        const r0 = await fetch(`${API}/api/staging-brief`, {
+                            method: "POST", headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({
+                                description: prompt.slice(0, 400),
+                                topview_desc: (sbItem.topViewDesc || "").trim(),
+                                trajectory_desc: (sbItem.trajViewDesc || "").trim(),
+                                characters: (currentData.storyData.characters || []).map(c => ({ name: c.name || "", description: c.description || "" })),
+                                cam_summary: (sbItem.topViewCamSummary || sbItem.trajViewCamSummary || "").trim() || null,
+                            }),
+                        });
+                        if (r0.ok) { const j0 = await r0.json(); if (j0.staging_brief) diagramBrief = j0.staging_brief; }
+                    } catch (_) { /* 解读失败不影响生图 */ }
+                }
+                // 调度图精准坐标数据：/api/render-diagram 返回的 plot，后端会翻译成自然语言注入 prompt 末尾
+                const plotData = (type === 'sb' && sbItem) ? (sbItem.topViewPlot || sbItem.trajViewPlot || null) : null;
                 const resp = await fetch(`${API}/api/generate-image`, {
                     method: "POST", headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ prompt, size: sizeMap[aspect] || "1080x1920", reference_urls: referenceUrls.length > 0 ? referenceUrls : null, reference_meta: referenceUrls.length > 0 ? referenceMeta : null, context: referenceUrls.length > 0 ? prompt : null }),
+                    body: JSON.stringify({ prompt, size: sizeMap[aspect] || "1080x1920", reference_urls: referenceUrls.length > 0 ? referenceUrls : null, reference_meta: referenceUrls.length > 0 ? referenceMeta : null, context: referenceUrls.length > 0 ? prompt : null, diagram_brief: diagramBrief, plot_data: plotData }),
                 });
                 if (!resp.ok) {
                     let detail = `HTTP ${resp.status}`;
@@ -896,6 +965,7 @@
                 
                 if (type === 'char') currentData.storyData.characters[indexOrId].imgSrc = imgSrc;
                 else if (type === 'scene') currentData.storyData.scenes[indexOrId].imgSrc = imgSrc;
+                else if (type === 'prop') currentData.storyData.props[indexOrId].imgSrc = imgSrc;
                 else if (type === 'sb') {
                     const sbItem = currentData.storyData.storyboards.find(s => s._id === indexOrId);
                     if (sbItem) {
@@ -980,6 +1050,375 @@
                 }
             };
             reader.readAsDataURL(file);
+        }
+
+        // ================= 调度参考图（俯视/轨迹）：口述 → AI 解析坐标 → 程序精确绘制平面图纸 =================
+        // 口述框内容持久化，逻辑与角色/场景/分镜提示词一致
+        function updateDiagramDesc(sbId, kind, value) {
+            const sb = currentData.storyData.storyboards.find(s => s._id === sbId); if (!sb) return;
+            if (kind === "topview") sb.topViewDesc = value; else sb.trajViewDesc = value;
+            saveCurrentProject();
+        }
+        async function genDiagram(sbId, kind) {
+            const sd = currentData.storyData; if (!sd) return;
+            const sb = sd.storyboards.find(s => s._id === sbId); if (!sb) return;
+            const isTop = kind === "topview";
+            const slot = document.getElementById(`diag-slot-${kind}-${sbId}`);
+            const descBox = document.getElementById(`diag-desc-${kind}-${sbId}`);
+            // 口述框当前内容就是导演指令：显示什么发送什么（与分镜提示词同逻辑）
+            const feedback = ((descBox ? descBox.value : "") || "").trim();
+            if (slot) slot.innerHTML = `<div class='hint' style='color:#b45309; margin:0;'>${isTop ? "📐" : "🏃"} AI 解析口述坐标中…</div>`;
+
+            const promptText = sb.edited_prompt || sb.image_prompt || "";
+            const scenes = sd.scenes || [];
+            const scene = scenes.find(s => (s.name || "") && (promptText + (sb.description || "")).includes(s.name)) || scenes[0] || null;
+            const matchedChars = (sd.characters || []).filter(c => (c.name || "") && (promptText + (sb.description || "")).includes(c.name));
+            const charsForDiagram = matchedChars.length ? matchedChars : (sd.characters || []);
+
+            const body = {
+                kind,
+                description: sb.description || promptText.slice(0, 300),
+                dialogue: sb.dialogue || "",
+                duration: sb.duration || 3,
+                video_prompt: sb.video_prompt || "",
+                scene_name: scene ? (scene.name || "") : "",
+                scene_description: scene ? (scene.edited_prompt || scene.image_prompt || scene.description || "") : "",
+                characters: charsForDiagram.map(c => ({ name: c.name || "", description: c.description || "" })),
+                feedback: feedback,
+                // 轨迹图以俯视调度图为起点：角色站位/机位/陈设照抄鸟瞰图坐标，AI 只解析运动轨迹
+                base_plot: (!isTop && sb.topViewPlot) ? sb.topViewPlot : null,
+            };
+            try {
+                // 调度图由程序绘制（不是 AI 生图）：AI 只负责把口述解析成坐标数据，
+                // 图纸永远精确、干净、俯视正交，不会画成透视场景照片
+                const resp = await fetch(`${API}/api/render-diagram`, {
+                    method: "POST", headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(body),
+                });
+                if (!resp.ok) { const ej = await resp.json().catch(() => ({})); throw new Error(ej.detail || "HTTP " + resp.status); }
+                const data = await resp.json();
+                const url = window.location.origin + data.image_url;
+                if (isTop) {
+                    sb.topView = url; sb.useTopViewInVideo = true; sb.topViewPlot = data.plot || null; sb.topViewCamSummary = data.cam_summary || "";
+                } else {
+                    sb.trajView = url; sb.useTrajViewInVideo = true; sb.trajViewPlot = data.plot || null; sb.trajViewCamSummary = data.cam_summary || "";
+                }
+                saveCurrentProject();
+                renderStoryboards(sd);
+                if (data.source === "template") alert("AI 解析口述失败，已用默认布局绘制——请检查口述后点「重新生成」重试。");
+            } catch (e) {
+                if (slot) slot.innerHTML = `<div class='hint' style='color:#ef4444; margin:0;'>生成失败: ${e.message}</div>`;
+            }
+        }
+        // 手动修改后的调度图上传替换（如 AI 生成的位置/轨迹大致对、细节不对，可在外部修图后传回）
+        let uploadTargetDiagram = null; // {sbId, kind}
+        function uploadDiagram(sbId, kind) {
+            uploadTargetDiagram = { sbId, kind };
+            const input = document.getElementById("diagramUploadInput");
+            input.value = "";
+            input.click();
+        }
+        async function handleDiagramUpload(ev) {
+            const file = ev.target.files[0];
+            if (!file || !uploadTargetDiagram) return;
+            const { sbId, kind } = uploadTargetDiagram;
+            const isTop = kind === "topview";
+            const slot = document.getElementById(`diag-slot-${kind}-${sbId}`);
+            if (slot) slot.innerHTML = "<div class='hint' style='color:#3b82f6; margin:0;'>📤 上传中…</div>";
+            const reader = new FileReader();
+            reader.onload = async () => {
+                try {
+                    const resp = await fetch(`${API}/api/upload-image`, {
+                        method: "POST", headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ image_base64: reader.result, filename: file.name }),
+                    });
+                    if (!resp.ok) { const err = await resp.json().catch(() => ({})); throw new Error(err.detail || "上传失败"); }
+                    const data = await resp.json();
+                    const url = window.location.origin + data.image_url;
+                    const sb = currentData.storyData.storyboards.find(s => s._id === sbId);
+                    if (sb) {
+                        if (isTop) { sb.topView = url; sb.useTopViewInVideo = true; }
+                        else { sb.trajView = url; sb.useTrajViewInVideo = true; }
+                    }
+                    saveCurrentProject();
+                    renderStoryboards(currentData.storyData);
+                } catch (e) {
+                    if (slot) slot.innerHTML = `<div class='hint' style='color:#ef4444; margin:0;'>上传失败: ${e.message}</div>`;
+                }
+            };
+            reader.readAsDataURL(file);
+        }
+        // 借用其他分镜的调度图：直接引用那张图（同一场景布局的镜头不用重复生成），
+        // 并继承其口述说明（位置/轨迹文字会注入后续分镜图的提示词）
+        function borrowDiagram(sbId, kind, fromSbId) {
+            if (!fromSbId) return;
+            const sd = currentData.storyData; if (!sd) return;
+            const sb = sd.storyboards.find(s => s._id === sbId);
+            const src = sd.storyboards.find(s => s._id === fromSbId);
+            if (!sb || !src) return;
+            const isTop = kind === "topview";
+            const url = isTop ? src.topView : src.trajView;
+            if (!url) return alert("该分镜还没有这种调度图");
+            if (isTop) {
+                sb.topView = url;
+                if (!(sb.topViewDesc || "").trim()) sb.topViewDesc = src.topViewDesc || "";
+                sb.topViewPlot = src.topViewPlot || null;
+                sb.topViewCamSummary = src.topViewCamSummary || "";
+                sb.useTopViewInVideo = true;
+            } else {
+                sb.trajView = url;
+                if (!(sb.trajViewDesc || "").trim()) sb.trajViewDesc = src.trajViewDesc || "";
+                sb.trajViewPlot = src.trajViewPlot || null;
+                sb.trajViewCamSummary = src.trajViewCamSummary || "";
+                sb.useTrajViewInVideo = true;
+            }
+            saveCurrentProject();
+            renderStoryboards(sd);
+        }
+        function deleteDiagram(sbId, kind) {
+            const sb = currentData.storyData.storyboards.find(s => s._id === sbId); if (!sb) return;
+            if (!confirm("确定删除这张调度图吗？（口述内容会保留）")) return;
+            if (kind === "topview") { sb.topView = null; sb.topViewPrompt = null; sb.topViewPlot = null; sb.topViewCamSummary = ""; sb.topViewCamBackup = null; }
+            else { sb.trajView = null; sb.trajViewPrompt = null; sb.trajViewPlot = null; sb.trajViewCamSummary = ""; }
+            saveCurrentProject();
+            renderStoryboards(currentData.storyData);
+        }
+        function toggleDiagramUse(sbId, kind, checked) {
+            const sb = currentData.storyData.storyboards.find(s => s._id === sbId); if (!sb) return;
+            if (kind === "topview") sb.useTopViewInVideo = checked; else sb.useTrajViewInVideo = checked;
+            saveCurrentProject();
+        }
+
+        // ================= 取景框 + 机位：在俯视图上标注本分镜的取景范围与机位位置 =================
+        // 标注模式跨重渲染保持：renderStoryboards 会整体重建 DOM，dataset 会丢，
+        // 用这张表记住每个分镜正处于哪种标注模式，重渲染后由 applyDiagramMode 恢复
+        const diagramModeState = {};
+        function setDrawMode(wrap, mode) {
+            wrap.dataset.frameMode = mode === "frame" ? "1" : "0";
+            wrap.dataset.camMode = mode === "cam" ? "1" : "0";
+            wrap.style.cursor = mode ? "crosshair" : "default";
+            wrap.style.outline = mode === "frame" ? "2px solid #ef4444" : (mode === "cam" ? "2px solid #ff8a00" : "");
+        }
+        // 重渲染后恢复标注模式与按钮文字（wrap 是新元素，dataset 全新，必须重新套用）
+        function applyDiagramMode(sbId) {
+            const wrap = document.getElementById(`frame-wrap-${sbId}`);
+            if (!wrap) return;
+            const mode = diagramModeState[sbId] || null;
+            setDrawMode(wrap, mode);
+            const sb = sbById(sbId);
+            const fb = document.getElementById(`frame-btn-${sbId}`);
+            const cb = document.getElementById(`cam-btn-${sbId}`);
+            if (fb) {
+                if (mode === "frame") { fb.textContent = "✅ 完成画框"; fb.title = "在图上按住左键拖拽画一个矩形，松开即保存"; }
+                else { fb.textContent = (sb && sb.topViewFrame) ? "🔲 重画取景框" : "🔲 画取景框"; fb.title = "在俯视图上拖拽画一个矩形，表示本分镜的取景范围"; }
+            }
+            if (cb) {
+                if (mode === "cam") { cb.textContent = "✅ 完成标机位"; cb.title = "在图上按下一点确定机位位置，拖动出方向后松手确定机位朝向；不拖动则保持原朝向"; }
+                else { cb.textContent = (sb && sb.topViewCam) ? "📷 移动机位" : "📷 标机位"; cb.title = "在俯视图上点击标注机位位置（远近与左右换算以标注机位为准）"; }
+            }
+        }
+        function toggleFrameDraw(sbId, btn) {
+            const wrap = document.getElementById(`frame-wrap-${sbId}`);
+            if (!wrap) return;
+            const on = wrap.dataset.frameMode === "1";
+            diagramModeState[sbId] = on ? null : "frame";
+            setDrawMode(wrap, on ? null : "frame");
+            btn.textContent = on ? (sbById(sbId)?.topViewFrame ? "🔲 重画取景框" : "🔲 画取景框") : "✅ 完成画框";
+            btn.title = on ? "" : "在图上按住左键拖拽画一个矩形，松开即保存";
+            const cb = document.getElementById(`cam-btn-${sbId}`);
+            if (cb && !on) cb.textContent = "📷 标机位";
+        }
+        function toggleCamMark(sbId, btn) {
+            const wrap = document.getElementById(`frame-wrap-${sbId}`);
+            if (!wrap) return;
+            const on = wrap.dataset.camMode === "1";
+            diagramModeState[sbId] = on ? null : "cam";
+            setDrawMode(wrap, on ? null : "cam");
+            btn.textContent = on ? (sbById(sbId)?.topViewCam ? "📷 移动机位" : "📷 标机位") : "✅ 完成标机位";
+            btn.title = on ? "" : "在图上按下一点确定机位位置，拖动出方向后松手确定机位朝向；不拖动则保持原朝向";
+            const fb = document.getElementById(`frame-btn-${sbId}`);
+            if (fb && !on) fb.textContent = (sbById(sbId)?.topViewFrame ? "🔲 重画取景框" : "🔲 画取景框");
+        }
+        function sbById(sbId) {
+            return (currentData.storyData?.storyboards || []).find(s => s._id === sbId) || null;
+        }
+        function clearTopViewFrame(sbId) {
+            const sb = sbById(sbId); if (!sb) return;
+            sb.topViewFrame = null;
+            saveCurrentProject();
+            renderStoryboards(currentData.storyData);
+        }
+        function clearTopViewCam(sbId) {
+            const sb = sbById(sbId); if (!sb) return;
+            // 有备份（手动移过机位）→ 还原成原图纸；否则只清掉表情标注
+            if (sb.topViewCamBackup) {
+                sb.topView = sb.topViewCamBackup.url;
+                sb.topViewPlot = sb.topViewCamBackup.plot;
+                sb.topViewCamSummary = sb.topViewCamBackup.camSummary;
+                sb.topViewCamBackup = null;
+            }
+            sb.topViewCam = null;
+            saveCurrentProject();
+            renderStoryboards(currentData.storyData);
+        }
+        function attachFrameDrawing() {
+            document.querySelectorAll("[data-frame-draw='1']").forEach(wrap => {
+                if (wrap._frameBound) return;
+                wrap._frameBound = true;
+                // 禁掉图片原生拖拽与选中：否则在图上按下拖动会触发浏览器拖图，后面的移动/抬起事件全被吞掉，朝向画不出来
+                wrap.querySelectorAll("img").forEach(img => { img.draggable = false; });
+                wrap.addEventListener("dragstart", e => e.preventDefault());
+                wrap.style.touchAction = "none";
+                // 用 Pointer 事件 + 指针捕获：按住拖动时即使指针移出图片也持续收到 move/up，不会中断
+                wrap.addEventListener("pointerdown", e => {
+                    if (e.button !== 0) return;
+                    const rectOf = ev => {
+                        const r = wrap.getBoundingClientRect();
+                        return {
+                            x: Math.min(1, Math.max(0, (ev.clientX - r.left) / r.width)),
+                            y: Math.min(1, Math.max(0, (ev.clientY - r.top) / r.height)),
+                        };
+                    };
+                    // 机位模式：按下定位置、拖动定朝向（黄线预览），松手后把机位真正移进图纸重绘——标注即替换，不叠第二个机位符号
+                    if (wrap.dataset.camMode === "1") {
+                        e.preventDefault();
+                        const sb = sbById(wrap.dataset.sb);
+                        if (!sb) return;
+                        const s = rectOf(e);
+                        const dirLine = document.createElement("div");
+                        dirLine.style.cssText = "position:absolute; height:3px; background:#f59e0b; transform-origin:0 50%; pointer-events:none; border-radius:2px; opacity:.85;";
+                        dirLine.style.left = (s.x * 100) + "%"; dirLine.style.top = (s.y * 100) + "%"; dirLine.style.width = "0px";
+                        wrap.appendChild(dirLine);
+                        const onMove = ev => {
+                            if (ev.pointerId !== e.pointerId) return;
+                            const c = rectOf(ev);
+                            const dx = c.x - s.x, dy = c.y - s.y;
+                            const px = Math.min(Math.hypot(dx, dy) * wrap.getBoundingClientRect().width, 220);
+                            dirLine.style.width = px + "px";
+                            dirLine.style.transform = `rotate(${Math.atan2(dy, dx) * 180 / Math.PI}deg)`;
+                        };
+                        const detach = () => { wrap.removeEventListener("pointermove", onMove); wrap.removeEventListener("pointerup", onUp); wrap.removeEventListener("pointercancel", detach); };
+                        const onUp = async ev => {
+                            if (ev.pointerId !== e.pointerId) return;
+                            detach();
+                            const c = rectOf(ev);
+                            const dx = c.x - s.x, dy = c.y - s.y;
+                            // 拖动距离足够才算设定了朝向；纯点击保持原朝向
+                            const facing = Math.hypot(dx, dy) > 0.04 ? ((Math.atan2(dx, -dy) * 180 / Math.PI) + 360) % 360 : null;
+                            // 首次覆盖前备份原图纸，供「清除机位」还原
+                            if (sb.topViewPlot && !sb.topViewCamBackup) {
+                                sb.topViewCamBackup = { url: sb.topView, plot: sb.topViewPlot, camSummary: sb.topViewCamSummary || "" };
+                            }
+                            if (sb.topViewPlot) {
+                                let mark = document.getElementById(`cam-mark-${wrap.dataset.sb}`);
+                                if (!mark) { mark = document.createElement("div"); mark.id = `cam-mark-${wrap.dataset.sb}`; mark.style.cssText = "position:absolute; transform:translate(-50%,-50%); pointer-events:none; font-size:20px; text-shadow:0 0 3px #fff, 0 0 4px #fff;"; wrap.appendChild(mark); }
+                                mark.textContent = "⏳"; mark.style.left = (s.x * 100) + "%"; mark.style.top = (s.y * 100) + "%";
+                                try {
+                                    const r = await fetch(`${API}/api/move-camera`, { method: "POST", headers: { "Content-Type": "application/json" },
+                                        body: JSON.stringify({ plot: sb.topViewPlot, x: s.x, y: s.y, facing }) });
+                                    if (r.ok) {
+                                        const j = await r.json();
+                                        sb.topView = j.image_url; sb.topViewPlot = j.plot; sb.topViewCamSummary = j.cam_summary || "";
+                                        sb.topViewCam = null; // 机位已画进图纸，无需再叠表情符号
+                                        diagramModeState[sb._id] = null; // 标完自动退出标注模式
+                                        saveCurrentProject(); renderStoryboards(currentData.storyData);
+                                        return;
+                                    }
+                                } catch (_) { /* 失败退回表情标注 */ }
+                            }
+                            // 无坐标数据（本地上传图）或后端失败：退回表情标注
+                            sb.topViewCam = { x: s.x, y: s.y, facing };
+                            diagramModeState[sb._id] = null; // 标完自动退出标注模式
+                            saveCurrentProject(); renderStoryboards(currentData.storyData);
+                        };
+                        try { wrap.setPointerCapture(e.pointerId); } catch (_) {}
+                        wrap.addEventListener("pointermove", onMove);
+                        wrap.addEventListener("pointerup", onUp);
+                        wrap.addEventListener("pointercancel", detach);
+                        return;
+                    }
+                    if (wrap.dataset.frameMode !== "1") return;
+                    e.preventDefault();
+                    const s = rectOf(e);
+                    const box = document.createElement("div");
+                    box.style.cssText = "position:absolute; border:2px dashed #ef4444; background:rgba(239,68,68,.08); pointer-events:none;";
+                    wrap.appendChild(box);
+                    const move = ev => {
+                        if (ev.pointerId !== e.pointerId) return;
+                        const c = rectOf(ev);
+                        box.style.left = (Math.min(s.x, c.x) * 100) + "%";
+                        box.style.top = (Math.min(s.y, c.y) * 100) + "%";
+                        box.style.width = (Math.abs(c.x - s.x) * 100) + "%";
+                        box.style.height = (Math.abs(c.y - s.y) * 100) + "%";
+                    };
+                    const up = ev => {
+                        if (ev.pointerId !== e.pointerId) return;
+                        wrap.removeEventListener("pointermove", move);
+                        wrap.removeEventListener("pointerup", up);
+                        wrap.removeEventListener("pointercancel", cancel);
+                        const c = rectOf(ev);
+                        box.remove();
+                        const sb = sbById(wrap.dataset.sb);
+                        const f = { x: Math.min(s.x, c.x), y: Math.min(s.y, c.y), w: Math.abs(c.x - s.x), h: Math.abs(c.y - s.y) };
+                        diagramModeState[wrap.dataset.sb] = null; // 画完自动退出标注模式
+                        if (sb && f.w > 0.03 && f.h > 0.03) {
+                            sb.topViewFrame = f;
+                            saveCurrentProject();
+                        }
+                        renderStoryboards(currentData.storyData);
+                    };
+                    const cancel = () => { box.remove(); wrap.removeEventListener("pointermove", move); wrap.removeEventListener("pointerup", up); wrap.removeEventListener("pointercancel", cancel); };
+                    try { wrap.setPointerCapture(e.pointerId); } catch (_) {}
+                    wrap.addEventListener("pointermove", move);
+                    wrap.addEventListener("pointerup", up);
+                    wrap.addEventListener("pointercancel", cancel);
+                });
+            });
+        }
+        // 兜底：分镜列表任何局部/异步 DOM 变化后，自动给新出现的调度图容器补绑画框/机位事件
+        // （防止某条更新路径只换了 diag-slot 内容、没走 renderStoryboards 导致事件丢失）
+        const _sbListObserverEl = document.getElementById("storyboardsList");
+        if (_sbListObserverEl && window.MutationObserver) {
+            new MutationObserver(() => attachFrameDrawing())
+                .observe(_sbListObserverEl, { childList: true, subtree: true });
+        }
+        // 把取景框（红框+框外压暗）与机位符号（红点+机位字样）烙进俯视图副本，AI 看到的参考图上带导演标注
+        function topViewAnnotated(url, sb) {
+            return new Promise(resolve => {
+                const img = new Image();
+                img.onload = () => {
+                    try {
+                        const c = document.createElement("canvas");
+                        c.width = img.naturalWidth; c.height = img.naturalHeight;
+                        const ctx = c.getContext("2d");
+                        ctx.drawImage(img, 0, 0);
+                        if (sb.topViewFrame) {
+                            const fx = sb.topViewFrame.x * c.width, fy = sb.topViewFrame.y * c.height;
+                            const fw = sb.topViewFrame.w * c.width, fh = sb.topViewFrame.h * c.height;
+                            // 框外区域压暗：视觉上直观表达"这些不在画面里"
+                            ctx.fillStyle = "rgba(10,10,10,0.62)";
+                            ctx.fillRect(0, 0, c.width, fy);
+                            ctx.fillRect(0, fy + fh, c.width, c.height - (fy + fh));
+                            ctx.fillRect(0, fy, fx, fh);
+                            ctx.fillRect(fx + fw, fy, c.width - (fx + fw), fh);
+                            ctx.strokeStyle = "#ff2020";
+                            ctx.lineWidth = Math.max(6, c.width * 0.015);
+                            ctx.strokeRect(fx, fy, fw, fh);
+                        }
+                        if (sb.topViewCam) {
+                            const cx = sb.topViewCam.x * c.width, cy = sb.topViewCam.y * c.height;
+                            const r = Math.max(10, c.width * 0.02);
+                            ctx.fillStyle = "#ff2020";
+                            ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.fill();
+                            ctx.font = `bold ${Math.max(14, c.width * 0.025)}px sans-serif`;
+                            ctx.fillText("机位", cx + r * 1.5, cy + r * 0.6);
+                        }
+                        resolve(c.toDataURL("image/png"));
+                    } catch (err) { resolve(url); }
+                };
+                img.onerror = () => resolve(url);
+                img.src = url;
+            });
         }
 
         // ================= API 设置 =================
@@ -1166,6 +1605,47 @@
                     sb.images = legacy ? [{ url: legacy, role: "" }] : [];
                 }
                 if (!sb.imgSrc && sb.images.length) sb.imgSrc = sb.images[0].url;
+                // 调度参考图（俯视/轨迹）卡片内容：口述框（可编辑、持久化）→ 生成/上传/借用 → 可上传手改图替换
+                const diagramInner = (url, kind) => {
+                    const isTop = kind === "topview";
+                    const label = isTop ? "俯视调度图" : "轨迹调度图";
+                    const descKey = isTop ? "topViewDesc" : "trajViewDesc";
+                    const useKey = isTop ? "useTopViewInVideo" : "useTrajViewInVideo";
+                    const desc = sb[descKey] || "";
+                    // 可借用的来源：其他分镜里已生成的同类调度图
+                    const sources = (data.storyboards || []).filter(o => o._id !== sb._id && (isTop ? o.topView : o.trajView));
+                    return `
+                        <textarea id="diag-desc-${kind}-${sb._id}" class="prompt-edit-area" style="min-height:60px;" placeholder="${isTop
+                            ? "口述俯视走位（必填项：每个人物在平面上的位置、谁在谁的哪边、间距、朝向、机位符号位置与朝向）。如「小帅坐画左水箱边，小美紧挨水箱站他右后方，小胖在画上方围栏中部，瘦猴蹲画右中部，憨憨站瘦猴右后方；机位在画下方中部朝上拍，平拍」。留空则 AI 按分镜描述自行编排。"
+                            : "口述运动轨迹（人物站位起点自动继承俯视调度图坐标，无需重述；只说谁从哪走到哪、路径、朝向变化、机位是否移动）。如「憨憨从瘦猴旁边走到小胖旁边，转身；机位固定」。留空则 AI 按分镜描述在现有站位基础上编排。"}" oninput="autoGrow(this);updateDiagramDesc('${sb._id}', '${kind}', this.value)" title="口述内容是导演指令，生成时最高优先级">${escapeAttr(desc)}</textarea>
+                        <div style="margin-top:6px; display:flex; gap:6px; flex-wrap:wrap; align-items:center;">
+                            <button class="btn-sm" onclick="genDiagram('${sb._id}', '${kind}')">${url ? "🔄 重新生成" : "➕ 生成" + label}</button>
+                            <button class="btn-sm btn-ghost" onclick="uploadDiagram('${sb._id}', '${kind}')" title="上传本地图片直接作为${label}（可先在外部画好）">📁 上传调度图</button>
+                            ${sources.length ? `<select onchange="borrowDiagram('${sb._id}', '${kind}', this.value)" title="直接引用其他分镜已生成的${label}" style="width:auto; max-width:150px; height:24px; padding:2px 6px; font-size:12px; border-radius:6px;">
+                                <option value="">📋 借用其他分镜…</option>
+                                ${sources.map(o => `<option value="${o._id}">#${o.shot_number || "?"} 的${label}</option>`).join("")}
+                            </select>` : ""}
+                            ${url ? `<button class="btn-sm btn-red" onclick="deleteDiagram('${sb._id}', '${kind}')" title="删除这张调度图">✕</button>` : ""}
+                        </div>
+                        <div id="diag-slot-${kind}-${sb._id}" style="margin-top:8px;">${url
+                            ? (isTop
+                                ? `<div id="frame-wrap-${sb._id}" data-sb="${sb._id}" data-frame-draw="1" style="position:relative; display:inline-block;">
+                                    <img src="${url}" style="max-width:340px; max-height:340px; border-radius:8px; border:1px solid var(--border-color); display:block;">
+                                    ${sb.topViewFrame ? `<div style="position:absolute; left:${(sb.topViewFrame.x * 100).toFixed(2)}%; top:${(sb.topViewFrame.y * 100).toFixed(2)}%; width:${(sb.topViewFrame.w * 100).toFixed(2)}%; height:${(sb.topViewFrame.h * 100).toFixed(2)}%; border:2px dashed #ef4444; background:rgba(239,68,68,.08); pointer-events:none;"></div>` : ""}
+                                    ${sb.topViewCam ? `<div id="cam-mark-${sb._id}" style="position:absolute; left:${(sb.topViewCam.x * 100).toFixed(2)}%; top:${(sb.topViewCam.y * 100).toFixed(2)}%; transform:translate(-50%,-50%); pointer-events:none; font-size:26px; text-shadow:0 0 3px #fff, 0 0 4px #fff;">📷</div>` : ""}
+                                </div>
+                                ${(sb.topViewFrame || sb.topViewCam) ? `<span class="hint" style="display:block; margin:2px 0 0; max-width:340px;">${sb.topViewFrame ? "红框＝取景范围（裁切参考，不是机位）" : ""}${sb.topViewFrame && sb.topViewCam ? "；" : ""}${sb.topViewCam ? "📷＝机位：镜头架在此处朝视锥方向拍，画面＝从机位望出去；机位上/旁/后方的人不入画（程序判定）" : ""}</span>` : `<span class="hint" style="display:block; margin:2px 0 0; max-width:340px;">点「画取景框」拖拽框定取景范围，或点「标机位」在图上点选机位</span>`}`
+                                : `<img src="${url}" style="max-width:340px; max-height:340px; border-radius:8px; border:1px solid var(--border-color);">`)
+                            : `<span class="hint" style="margin:0; display:block;">可 AI 生成、上传本地图，或借用其他分镜已生成的${label}</span>`}</div>
+                        ${url && isTop ? `<div style="margin-top:4px; display:flex; gap:6px; flex-wrap:wrap; align-items:center;">
+                            <button class="btn-sm btn-ghost" id="frame-btn-${sb._id}" onclick="toggleFrameDraw('${sb._id}', this)" title="在俯视图上拖拽画一个矩形，表示本分镜的取景范围">${sb.topViewFrame ? "🔲 重画取景框" : "🔲 画取景框"}</button>
+                            ${sb.topViewFrame ? `<button class="btn-sm btn-ghost" onclick="clearTopViewFrame('${sb._id}')">🗑 清除取景框</button>` : ""}
+                            <button class="btn-sm btn-ghost" id="cam-btn-${sb._id}" onclick="toggleCamMark('${sb._id}', this)" title="在俯视图上点击标注机位位置（远近与左右换算以标注机位为准）">${sb.topViewCam ? "📷 移动机位" : "📷 标机位"}</button>
+                            ${sb.topViewCam ? `<button class="btn-sm btn-ghost" onclick="clearTopViewCam('${sb._id}')">🗑 清除机位</button>` : ""}
+                        </div>` : ""}
+                        ${url ? `<label style="font-size:12px; display:flex; gap:4px; align-items:center; cursor:pointer; margin-top:6px;"><input type="checkbox" ${sb[useKey] !== false ? "checked" : ""} onchange="toggleDiagramUse('${sb._id}', '${kind}', this.checked)"> 生成视频时参考</label>` : ""}
+                    `;
+                };
                 const galleryHtml = sb.images.map((im, idx) => {
                     const borderColor = im.role === "first" ? "#3b82f6" : (im.role === "last" ? "#f59e0b" : "transparent");
                     const roleLabel = im.role === "first" ? "首帧" : (im.role === "last" ? "尾帧" : "普通");
@@ -1206,6 +1686,22 @@
                         </div>
                         <div id="sb-au-${sb._id}" style="margin-top:6px;"></div>
                         <div class="image-slot" id="sb-img-${sb._id}" ${sb.images.length ? `data-image-url="${sb.images[0].url}"` : ''}>${galleryHtml}</div>
+                        <div style="margin-top:12px; padding:10px 12px; background:#fffbeb; border:1px dashed #fcd34d; border-radius:10px;">
+                            <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+                                <span style="font-size:13px; font-weight:600;">🗺️ 调度参考图</span>
+                                <span class="hint" style="display:inline; margin:0;">口述位置关系与轨迹 → AI 解析成坐标 → <b>程序精确绘制平面图纸</b>（非 AI 生图，永不跑偏）。图纸即<b>导演定稿</b>：规定人物位置关系、运动轨迹、机位（与文字提示词冲突时以此为准）；景别构图、画风长相仍按提示词。可画取景框/标机位，生成分镜图时自动最高优先级参考</span>
+                            </div>
+                            <div style="margin-top:8px; display:flex; gap:14px; flex-wrap:wrap;">
+                                <div style="flex:1; min-width:360px;">
+                                    <div style="font-size:12px; font-weight:600; color:#92400e; margin-bottom:4px;">📐 俯视调度图（上帝视角平面走位 + 机位）</div>
+                                    <div id="sb-topview-${sb._id}">${diagramInner(sb.topView, 'topview')}</div>
+                                </div>
+                                <div style="flex:1; min-width:360px;">
+                                    <div style="font-size:12px; font-weight:600; color:#92400e; margin-bottom:4px;">🏃 轨迹调度图（角色运动路径 + 镜头轨迹）</div>
+                                    <div id="sb-trajview-${sb._id}">${diagramInner(sb.trajView, 'trajectory')}</div>
+                                </div>
+                            </div>
+                        </div>
                         <div style="margin-top:14px; display:flex; gap:10px; flex-wrap: wrap; align-items:center;">
                             <button onclick="genImage('sb', '${sb._id}')">${sb.images.length ? '🎨 再生成一张' : '🎨 生成分镜图'}</button>
                             <button class="btn-ghost" onclick="addSbImage('${sb._id}')">📁 添加本地图</button>
@@ -1224,7 +1720,7 @@
                             <video src="${sb.videoUrl}" controls style="max-width:280px; width:100%; border-radius:8px; display:block; border:1px solid var(--border-color);"></video>
                             <div style="margin-top:8px; display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
                                 <a class="btn-download" href="${sb.videoUrl}" download="分镜_${sb.shot_number || i+1}.mp4" style="text-decoration:none; display:inline-block;">📥 保存到电脑</a>
-                                <button class="btn-del-item" onclick="clearSbVideo('${sb._id}')" title="从分镜移除视频（不删除本地文件）">✕ 移除</button>
+                                <button class="btn-del-item" onclick="clearSbVideo('${sb._id}')" title="删除视频（同时删除本地文件，不可恢复）">🗑 删除</button>
                             </div>
                         </div>` : ''}
                     </div>
@@ -1235,6 +1731,9 @@
                 const ps = sbProgressState[sb._id];
                 if (ps) applySbProgress(sb._id, ps.text, ps.pct, ps.visible);
             });
+            attachFrameDrawing();
+            // 重渲染重建了 DOM：恢复各分镜的标注模式（dataset 会丢，按 diagramModeState 套回）
+            document.querySelectorAll("[data-frame-draw='1']").forEach(w => applyDiagramMode(w.dataset.sb));
             initSortable();
         }
 
@@ -1304,6 +1803,29 @@
             });
             document.getElementById("scenesSection").classList.remove("hidden");
 
+            // 道具
+            const propGrid = document.getElementById("propsGrid"); propGrid.innerHTML = "";
+            (data.props || []).forEach((p, i) => {
+                const savedImg = p.imgSrc || currentData.images[`prop-${i}`];
+                const currentPrompt = p.edited_prompt || p.image_prompt || p.description;
+                const card = document.createElement("div"); card.className = "card";
+                card.innerHTML = `
+                    <div style="display:flex; align-items:center;"><input class="label" style="flex:1; min-width:0; border:none; border-bottom:1px dashed transparent; background:transparent; padding:0; font-weight:600; color:inherit; font-size:inherit;" title="点击修改名称" value="${escapeAttr(p.name || "道具 " + (i+1))}" onchange="renameItem('prop', ${i}, this.value)"><button class="btn-del-item" onclick="deleteItem('prop', ${i})">删除</button></div>
+                    <div class="value">${renderMarkdown(p.description || "")}</div>
+                    <textarea id="prop-prompt-${i}" class="prompt-edit-area" oninput="autoGrow(this);updatePrompt('prop', ${i}, this.value)" title="可直接修改，或把新要求写进来后点 ✨重写">${currentPrompt}</textarea>
+                    <div style="margin-top:6px; display:flex; gap:6px; align-items:center;">
+                        <button class="btn-rewrite" onclick="regeneratePrompt('prop', ${i})">✨ 重写</button>
+                        <span style="font-size:11px; color:#9ca3af;">直接在框里改或写新要求，重写后覆盖</span>
+                    </div>
+                    <div class="image-slot" id="prop-img-${i}" ${savedImg ? `data-image-url="${savedImg}"` : ''}>${savedImg ? `<img src="${savedImg}">` : ''}</div>
+                    <div style="margin-top:12px; display:flex; flex-wrap:wrap; gap:10px;">
+                        <button onclick="genImage('prop', ${i})" style="flex:1;">${savedImg ? '重新生成' : '生成'}</button>
+                        ${savedImg ? `<button class="btn-download" onclick="downloadImage('${savedImg}', '道具_${escapeAttr(p.name || "道具")}.png')">📥 保存原图</button>` : ''}
+                    </div>
+                `; propGrid.appendChild(card);
+            });
+            document.getElementById("propsSection").classList.remove("hidden");
+
             renderStoryboards(data);
             document.getElementById("storyboardsSection").classList.remove("hidden");
             document.getElementById("videoSection").classList.remove("hidden");
@@ -1313,6 +1835,7 @@
             if (!currentData.storyData) return;
             if (type === 'character') currentData.storyData.characters[index].edited_prompt = newValue;
             if (type === 'scene') currentData.storyData.scenes[index].edited_prompt = newValue;
+            if (type === 'prop') currentData.storyData.props[index].edited_prompt = newValue;
             saveCurrentProject();
         }
         // HTML 属性转义（名字里可能带引号，直接拼进 value 会截断）
@@ -1325,6 +1848,7 @@
             if (!newName) return alert("名称不能为空");
             if (type === 'character') currentData.storyData.characters[index].name = newName;
             if (type === 'scene') currentData.storyData.scenes[index].name = newName;
+            if (type === 'prop') currentData.storyData.props[index].name = newName;
             saveCurrentProject();
             renderStory(currentData.storyData, true);  // 重渲染让"保存原图"文件名等同步更新
         }
@@ -1396,6 +1920,10 @@
                 const s = sd.scenes[indexOrId]; if (!s) return;
                 payload.name = s.name || ""; payload.description = s.description || "";
                 ta = document.getElementById(`scene-prompt-${indexOrId}`);
+            } else if (type === 'prop') {
+                const p = sd.props[indexOrId]; if (!p) return;
+                payload.name = p.name || ""; payload.description = p.description || "";
+                ta = document.getElementById(`prop-prompt-${indexOrId}`);
             } else {
                 const sb = sd.storyboards.find(x => x._id === indexOrId); if (!sb) return;
                 payload.name = `镜头 ${sb.shot_number || ""}`;
@@ -1426,6 +1954,9 @@
                 } else if (type === 'scene') {
                     const s = sd.scenes[indexOrId];
                     s.image_prompt = data.image_prompt; delete s.edited_prompt;
+                } else if (type === 'prop') {
+                    const p = sd.props[indexOrId];
+                    p.image_prompt = data.image_prompt; delete p.edited_prompt;
                 } else {
                     const sb = sd.storyboards.find(x => x._id === indexOrId);
                     sb.image_prompt = data.image_prompt;
@@ -1475,8 +2006,10 @@
         }
         function addNewItem(type) {
             if (!currentData.storyData) return;
+            if (!currentData.storyData.props) currentData.storyData.props = [];
             if (type === 'character') currentData.storyData.characters.push({name: "新角色", description: "描述", image_prompt: "描述画面"});
             else if (type === 'scene') currentData.storyData.scenes.push({name: "新场景", description: "描述", image_prompt: "描述画面"});
+            else if (type === 'prop') currentData.storyData.props.push({name: "新道具", description: "描述", image_prompt: "描述画面"});
             else if (type === 'storyboard') {
                 const len = currentData.storyData.storyboards.length;
                 currentData.storyData.storyboards.push({ _id: 'sb_' + Date.now() + '_' + len, shot_number: len + 1, description: "新分镜描述", dialogue: "", duration: 3, image_prompt: "描述画面" });
@@ -1487,6 +2020,7 @@
             if (!confirm("确认删除？")) return;
             if (type === 'character') currentData.storyData.characters.splice(index, 1);
             else if (type === 'scene') currentData.storyData.scenes.splice(index, 1);
+            else if (type === 'prop') currentData.storyData.props.splice(index, 1);
             saveCurrentProject(); renderStory(currentData.storyData, true);
         }
 
@@ -1570,8 +2104,12 @@
 
             let body;
             if (mode === "reference") {
-                // 参考模式：所有分镜图都作为参考图（最多 9 张）
-                body = { image_urls: sbImages.slice(0, 9).map(im => im.url), frame_mode: "reference" };
+                // 参考模式：所有分镜图都作为参考图（最多 9 张）；
+                // 勾选了调度参考图（俯视/轨迹）时追加传给 AI，帮助理解走位与运动路径
+                const urls = sbImages.slice(0, 9).map(im => im.url);
+                if (sbItem.topView && sbItem.useTopViewInVideo !== false && urls.length < 9) urls.push(sbItem.topView);
+                if (sbItem.trajView && sbItem.useTrajViewInVideo !== false && urls.length < 9) urls.push(sbItem.trajView);
+                body = { image_urls: urls, frame_mode: "reference" };
             } else {
                 const workflowId = getSelectedWorkflowId();
                 if (!workflowId) return alert("请选择或填入工作流 ID（如 minimax_h3_lightx2v）。");
@@ -1643,6 +2181,8 @@
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({
                         prompt,
+                        // 轨迹调度图坐标（兜底用俯视图坐标）：后端翻译成运动轨迹指令注入视频提示词
+                        plot_data: sbItem.trajViewPlot || sbItem.topViewPlot || null,
                         ...body,
                         duration: getVideoDuration(),
                         resolution: "768p",
@@ -1699,13 +2239,23 @@
             sbProgressState[sbId] = { text: "", pct: 0, visible: false };
             applySbProgress(sbId, "", 0, false);
         }
-        function clearSbVideo(sbId) {
+        async function clearSbVideo(sbId) {
             if (!currentData.storyData) return;
             const sbItem = (currentData.storyData.storyboards || []).find(s => s._id === sbId);
-            if (!sbItem) return;
+            if (!sbItem || !sbItem.videoUrl) return;
+            if (!confirm("确认删除这个视频？将同时删除本地视频文件，不可恢复。")) return;
+            const fname = String(sbItem.videoUrl).split("/").pop().split("?")[0];
             sbItem.videoUrl = null;
             saveCurrentProject();
             renderStoryboards(currentData.storyData);
+            // 同步删除本地文件，避免孤儿视频越堆越多
+            if (fname.startsWith("video_") && fname.endsWith(".mp4")) {
+                try {
+                    const r = await fetch(`${API}/api/videos/${encodeURIComponent(fname)}`, { method: "DELETE" });
+                    if (!r.ok) console.warn("本地视频文件删除失败:", fname);
+                } catch (e) { /* 删除文件失败不影响移除引用 */ }
+                loadVideoGallery();
+            }
         }
 
         async function loadVideoGallery() {
@@ -1717,13 +2267,42 @@
                     g.innerHTML = `<span class="hint">还没有保存的视频，生成分镜图后点「生成视频」试试</span>`;
                     return;
                 }
-                g.innerHTML = data.videos.map(v => `
+                // 建立 视频文件 → 所属项目 的映射：每个项目的分镜都记录着自己的 videoUrl
+                const owner = {}; // 文件名 -> 项目名
+                (projects || []).forEach(p => {
+                    (((p.storyData || {}).storyboards) || []).forEach(sb => {
+                        if (!sb.videoUrl) return;
+                        const fname = String(sb.videoUrl).split("/").pop().split("?")[0];
+                        if (fname && !owner[fname]) owner[fname] = p.name || "未命名项目";
+                    });
+                });
+                // 按项目分组（后端已按时间倒序，组内保持新→旧）
+                const groups = new Map();
+                const orphans = [];
+                data.videos.forEach(v => {
+                    const proj = owner[v.name];
+                    if (proj) {
+                        if (!groups.has(proj)) groups.set(proj, []);
+                        groups.get(proj).push(v);
+                    } else {
+                        orphans.push(v);
+                    }
+                });
+                const card = v => `
                     <div style="display:inline-block; margin:0 12px 12px 0; background:#f9fafb; border:1px solid var(--border-color); border-radius:10px; padding:12px; vertical-align:top; position:relative;">
                         <button class="btn-del-item" style="margin-left:0; position:absolute; top:8px; right:8px; z-index:2;" onclick="deleteVideo('${v.name}')">删除</button>
                         <video src="${v.url}" controls style="max-width:280px; width:100%; border-radius:8px; display:block;"></video>
                         <div class="hint" style="margin-top:6px;">${v.name} · ${v.size_mb}MB · ${new Date(v.mtime).toLocaleString()}</div>
                         <a class="btn-download" href="${v.url}" download="${v.name}" style="display:inline-block; text-decoration:none; margin-top:8px;">📥 保存到电脑</a>
-                    </div>`).join('');
+                    </div>`;
+                let html = "";
+                const renderGroup = (title, vids, color) => {
+                    html += `<div style="margin:14px 0 6px; font-size:15px; font-weight:700; color:${color};">📂 ${escapeAttr(title)} <span class="hint" style="display:inline; font-weight:normal;">(${vids.length} 个视频)</span></div>`;
+                    html += vids.map(card).join('');
+                };
+                groups.forEach((vids, name) => renderGroup(name, vids, "#1d4ed8"));
+                if (orphans.length) renderGroup("未归属（旧视频或未关联到分镜）", orphans, "#92400e");
+                g.innerHTML = html;
             } catch (e) { /* 忽略画廊加载失败 */ }
         }
 
@@ -1771,9 +2350,17 @@
                             if (sbId && currentData.storyData) {
                                 const sbItem = (currentData.storyData.storyboards || []).find(s => s._id === sbId);
                                 if (sbItem) {
+                                    const oldUrl = sbItem.videoUrl;
                                     sbItem.videoUrl = finalUrl;
                                     saveCurrentProject();
                                     renderStoryboards(currentData.storyData);
+                                    // 重新生成覆盖旧视频：把旧文件从本地删掉，避免磁盘越堆越满
+                                    if (oldUrl && oldUrl !== finalUrl) {
+                                        const oldName = String(oldUrl).split("/").pop().split("?")[0];
+                                        if (oldName.startsWith("video_") && oldName.endsWith(".mp4")) {
+                                            fetch(`${API}/api/videos/${encodeURIComponent(oldName)}`, { method: "DELETE" }).catch(() => {});
+                                        }
+                                    }
                                 }
                             }
                             log.textContent = "✅ 视频生成完成！";
@@ -1818,6 +2405,9 @@
         document.addEventListener("click", (e) => {
             const img = e.target;
             if (img.tagName !== "IMG" || img.closest("#lightbox")) return;
+            // 调度图标注模式（画取景框/标机位）下点击图片是编辑操作，不弹放大预览
+            const drawWrap = img.closest("[data-frame-draw]");
+            if (drawWrap && (drawWrap.dataset.camMode === "1" || drawWrap.dataset.frameMode === "1")) return;
             const src = img.getAttribute("src") || "";
             if (!src || img.closest("#chatImagePreviewArea")) return;
             e.preventDefault();
