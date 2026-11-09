@@ -696,6 +696,21 @@ def _normalize_plot(plot: dict) -> dict:
 _DIAGRAM_PALETTE = ["#e6194b", "#3cb44b", "#4363d8", "#f58231", "#911eb4",
                     "#008080", "#f032e6", "#9a6324", "#000075", "#800000"]
 
+def _frame_side_text(cross: float, dist: float, fov: float) -> str:
+    """把机位相对的左右偏角换成生图模型能落地的画面落位描述。
+    cross/dist ＝ 人物相对视轴的带符号正弦（>0 视轴右侧）。
+    近轴（几乎正对镜头）时必须说'画面中部'——若硬说'画面左/右'，
+    模型会把几度的微小偏差放大成明显靠边，构图直接跑偏。"""
+    import math
+    if dist <= 1e-6:
+        return "画面中部"
+    lat_deg = math.degrees(math.asin(max(-1.0, min(1.0, cross / dist))))  # >0=视轴右侧
+    if abs(lat_deg) < 8:
+        return "画面中部（几乎正对镜头）"
+    edge = "、靠近画面边缘" if abs(lat_deg) > max(fov / 2, 30) else ""
+    return ("画面右侧" if lat_deg > 0 else "画面左侧") + edge
+
+
 def _camera_view_summary(plot: dict) -> str:
     """按坐标几何计算机位视野：谁在镜头前方（入画，近→远）、谁在机位旁/镜头后方（绝不入画）。
     这是权威事实，直接注入分镜生图约束，杜绝"从主角位置拍过去"的反向理解。"""
@@ -723,7 +738,7 @@ def _camera_view_summary(plot: dict) -> str:
         dot = (vx * fx + vy * fy) / dist
         angle = math.degrees(math.acos(max(-1.0, min(1.0, dot))))
         # cross>0 → 人物在机位视线右侧（即成片画面右侧）
-        side = "画面右" if (fx * vy - fy * vx) > 0 else "画面左"
+        side = _frame_side_text(fx * vy - fy * vx, dist, fov)
         if dist <= 0.15:
             hidden.append((name, dist, None, "紧贴机位（就在镜头旁边，不入画）"))
         elif dot <= 0:
@@ -741,8 +756,9 @@ def _camera_view_summary(plot: dict) -> str:
         seg = []
         for i, (name, dist, angle, side, facing_desc) in enumerate(visible):
             depth = "离镜头最近" if i == 0 else ("最远" if i == n else "中距")
+            vert = "位于画面下缘" if i == 0 else ("靠近画面上缘地平线" if i == n else "位于画面纵深中部")
             edge = "，靠近视野边缘可能被裁切" if angle > fov / 2 + 10 else ""
-            seg.append(f"{name}（{depth}、{side}侧、{facing_desc}{edge}）")
+            seg.append(f"{name}（{vert}、{depth}、{side}、{facing_desc}{edge}）")
         lines.append("机位前方视野内、会出现在画面中（从近到远）：" + "、".join(seg) + "。")
     else:
         lines.append("机位前方视野内没有人物（画面以环境空镜为主）。")
@@ -835,18 +851,19 @@ def format_plot_to_prompt(plot: dict) -> str:
             continue
         dot = (vx * fx + vy * fy) / dist
         angle = math.degrees(math.acos(max(-1.0, min(1.0, dot))))
-        side = "画面右" if (fx * vy - fy * vx) > 0 else "画面左"
+        raw_side = "画面右" if (fx * vy - fy * vx) > 0 else "画面左"
+        side = _frame_side_text(fx * vy - fy * vx, dist, fov)
         pf = float(c.get("facing") or 0) % 360
         pdir = dir_desc[min(((abs(pf - k), k) for k in dir_desc))[1]].replace("图纸", "面朝图纸")
         orient = _facing_relative_to_camera(pf, vx, vy, dist, rad)
         if dist <= 0.15:
-            measured.append((name, dist, None, None, f"紧贴机位{side}侧（就在镜头旁边，不入画），{orient}"))
+            measured.append((name, dist, None, None, f"紧贴机位{raw_side}侧（就在镜头旁边，不入画），{orient}"))
         elif dot <= 0:
             measured.append((name, dist, None, None, f"在机位身后（镜头后方，不入画），{orient}"))
         elif angle > fov / 2 + 25:
             measured.append((name, dist, None, None, f"在机位视野之外（不入画），{orient}"))
         else:
-            measured.append((name, dist, angle, side, f"在机位前方{side}侧、{orient}（图纸方位：{pdir}）"))
+            measured.append((name, dist, angle, side, f"在机位前方{side}、{orient}（图纸方位：{pdir}）"))
 
     visible = sorted([m for m in measured if "前方" in m[4]], key=lambda t: t[1])
     hidden = [m for m in measured if "前方" not in m[4]]
@@ -854,10 +871,12 @@ def format_plot_to_prompt(plot: dict) -> str:
     seg = []
     for i, (name, dist, angle, side, desc) in enumerate(visible):
         depth = "离镜头最近" if i == 0 else ("离镜头最远" if i == n else "中距")
+        vert = "位于画面下缘" if i == 0 else ("靠近画面上缘地平线" if i == n else "位于画面纵深中部")
         edge = "、靠近视野边缘可能被画面裁切" if angle and angle > fov / 2 + 10 else ""
-        seg.append(f"{name}（{depth}、{desc}{edge}）")
+        seg.append(f"{name}（{vert}、{depth}、{desc}{edge}）")
     if seg:
-        lines.append("【人物站位·入画名单（从近到远）】" + "；".join(seg) + "。")
+        lines.append("【人物站位·入画名单（从近到远）】（本名单中的「画面左/右」＝成片图像里观众看到的左/右，"
+                     "已按机位朝向换算，与图纸方位无关）" + "；".join(seg) + "。")
     else:
         lines.append("【人物站位】机位前方视野内没有人物，画面以环境空镜为主。")
     if hidden:
@@ -1432,6 +1451,73 @@ def log_prompt(kind: str, prompt: str, extra: str = ""):
     except Exception:
         pass
 
+# ---------- 导演显式落位检测：重写提示词里直接写了"某人在画面XX"，必须压过程序算的默认落位 ----------
+_FRAME_POS_KEYWORDS = [
+    # 长词在前，命中多个时取最长（"画面右上角"优先于"画面右"）
+    "画面右上角", "画面左上角", "画面右下角", "画面左下角",
+    "画面右上方", "画面左上方", "画面右下方", "画面左下方",
+    "画面正中间", "画面正中", "画面中央", "画面上方", "画面下方",
+    "画面右侧", "画面左侧", "画面右", "画面左",
+    "右上角", "左上角", "右下角", "左下角", "正中间", "正中",
+    "居中", "中央", "偏右", "偏左", "靠右", "靠左",
+]
+
+def _detect_frame_position_overrides(prompt: str, characters: list) -> str:
+    """扫描导演最终确认的文字提示词：某句话里同时出现角色名与画面落位词
+    （画面右上角/画面左/居中/偏右…）即视为导演对落位的显式指令。
+    若不注入覆盖声明，尾部权威名单里的默认"画面左/右"会把导演指令判为冲突作废，
+    导致重写永远不生效（生成结果总回到图纸几何位置）。返回"人→落位"清单文本。"""
+    import re
+    if not prompt:
+        return ""
+    names = []
+    for c in characters or []:
+        n = str((c or {}).get("name") or "").strip()
+        if n and n in prompt:
+            names.append(n)
+    # 紧邻落位词前如果是"面向/朝/望向"等词，那是视线或运动方向，不是落位
+    _GAZE_PREFIXES = ("面向", "朝向", "望向", "看向", "望着", "走向", "跑向", "扑向",
+                      "冲向", "飞向", "朝着", "指", "面朝", "望", "朝", "看")
+    hits: list[str] = []
+
+    def _add(entry: str):
+        if entry not in hits:
+            hits.append(entry)
+
+    for sentence in re.split(r"[。！？\n]", prompt):
+        cur_name = None  # 当前句主语：逗号分句没点名时沿用最近提到的人
+        # 按逗号/顿号也切开，避免"小帅在画面中央，小美靠左"两句被并成一句错配
+        for clause in re.split(r"[；，,、：:]", sentence):
+            # 主语识别先行：即使本分句只有视线用法，后面分句仍可沿用主语
+            hit_names = [n for n in names if n in clause]
+            if hit_names:
+                cur_name = hit_names[-1]
+            matched = {k for k in _FRAME_POS_KEYWORDS if k in clause}
+            # 去掉被同句更长关键词包含的短词（"画面右上角"吃掉"右上角""画面右"）
+            kws = [k for k in matched if not any(k != o and k in o for o in matched)]
+            for kw in sorted(kws, key=len, reverse=True):
+                # 每次出现都检查前缀：整句只有视线用法时跳过
+                is_gaze_only = True
+                start = 0
+                while True:
+                    i = clause.find(kw, start)
+                    if i < 0:
+                        break
+                    prefix = clause[max(0, i - 2):i]
+                    if not prefix.endswith(_GAZE_PREFIXES):
+                        is_gaze_only = False
+                    start = i + len(kw)
+                if is_gaze_only:
+                    continue
+                if "主体" in clause or "构图" in clause:
+                    # 无角色名的构图指令（如"构图主体略偏右"）按导演指令对待
+                    _add("画面主体→" + kw)
+                    continue
+                if cur_name:
+                    _add(f"{cur_name}→{kw}")
+    return "；".join(hits[:8])
+
+
 @app.post("/api/generate-image")
 async def generate_image(req: ImageRequest):
     log_prompt("生图", req.prompt, f"size={req.size} 参考图={len(req.reference_urls or [])}张")
@@ -1530,11 +1616,24 @@ async def generate_image(req: ImageRequest):
             plot_txt = format_plot_to_prompt(req.plot_data or {})
             if plot_txt:
                 directive += "【调度图纸坐标数据（程序按坐标翻译，权威）】\n" + plot_txt + "\n"
+            # 导演在重写框里直接指定的画面落位（画面右上角/偏右/居中…）必须压过程序算的默认落位——
+            # 否则权威名单里的"画面左/右"会把导演指令判为冲突作废，重写永远不生效
+            override_txt = _detect_frame_position_overrides(
+                req.prompt, (req.plot_data or {}).get("characters") or [])
+            if override_txt:
+                directive += (
+                    f"【导演落位指令·最高优先级】导演已在本条提示词中直接指定画面落位：{override_txt}。"
+                    "这是导演的显式构图指令，人物在成片画面中的实际落位以导演指定为准；"
+                    "上面名单与纵深解读中的「画面左/右」只是按调度图纸几何推算的默认落位，"
+                    "与导演指定冲突时按导演指定执行，不算文字冲突、不作废。"
+                    "但谁入画谁不入画、人物身体朝向、远近大小关系仍按上面名单与透视规则执行——导演落位指令只改变人物在画面中的方位。\n"
+                )
             directive += (
                 "【结尾重申·最高优先级】请逐条核对后再出图：①镜头位置与朝向只由「机位」符号决定；"
                 "②画面中出现的人物必须且只能是入画名单里的人，绝不入画名单里的人一个都不能出现；"
                 "③人物远近与大小按入画名单从近到远按透视排列；"
-                "④最终输出正常视角的真实镜头画面，不是俯视图或示意图。\n"
+                "④若存在【导演落位指令】，被指定人物在画面中的落位按导演指定执行；"
+                "⑤最终输出正常视角的真实镜头画面，不是俯视图或示意图。\n"
             )
             # 🌟 强指令放到 prompt 末尾：大模型对末尾指令的服从度最高，放开头容易被当背景介绍忽略
             payload["prompt"] = payload["prompt"] + "\n\n" + directive

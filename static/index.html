@@ -1108,7 +1108,7 @@
                 }
                 saveCurrentProject();
                 renderStoryboards(sd);
-                if (data.source === "template") alert("AI 解析口述失败，已用默认布局绘制——请检查口述后点「重新生成」重试。");
+                if (data.source === "template") alert("AI 解析口述失败，已用默认布局绘制——请检查口述后点「重生调度图」重试。");
             } catch (e) {
                 if (slot) slot.innerHTML = `<div class='hint' style='color:#ef4444; margin:0;'>生成失败: ${e.message}</div>`;
             }
@@ -1622,7 +1622,7 @@
                             ? "口述俯视走位（必填项：每个人物在平面上的位置、谁在谁的哪边、间距、朝向、机位符号位置与朝向）。如「小帅坐画左水箱边，小美紧挨水箱站他右后方，小胖在画上方围栏中部，瘦猴蹲画右中部，憨憨站瘦猴右后方；机位在画下方中部朝上拍，平拍」。留空则 AI 按分镜描述自行编排。"
                             : "口述运动轨迹（人物站位起点自动继承俯视调度图坐标，无需重述；只说谁从哪走到哪、路径、朝向变化、机位是否移动）。如「憨憨从瘦猴旁边走到小胖旁边，转身；机位固定」。留空则 AI 按分镜描述在现有站位基础上编排。"}" oninput="autoGrow(this);updateDiagramDesc('${sb._id}', '${kind}', this.value)" title="口述内容是导演指令，生成时最高优先级">${escapeAttr(desc)}</textarea>
                         <div style="margin-top:6px; display:flex; gap:6px; flex-wrap:wrap; align-items:center;">
-                            <button class="btn-sm" onclick="genDiagram('${sb._id}', '${kind}')">${url ? "🔄 重新生成" : "➕ 生成" + label}</button>
+                            <button class="btn-sm" onclick="genDiagram('${sb._id}', '${kind}')" title="${url ? "重新解析口述并重绘这张调度图（导演定稿，非AI生图）" : ""}">${url ? "🔄 重生调度图" : "➕ 生成" + label}</button>
                             <button class="btn-sm btn-ghost" onclick="uploadDiagram('${sb._id}', '${kind}')" title="上传本地图片直接作为${label}（可先在外部画好）">📁 上传调度图</button>
                             ${sources.length ? `<select onchange="borrowDiagram('${sb._id}', '${kind}', this.value)" title="直接引用其他分镜已生成的${label}" style="width:auto; max-width:150px; height:24px; padding:2px 6px; font-size:12px; border-radius:6px;">
                                 <option value="">📋 借用其他分镜…</option>
@@ -1706,7 +1706,7 @@
                             </div>
                         </div>
                         <div style="margin-top:14px; display:flex; gap:10px; flex-wrap: wrap; align-items:center;">
-                            <button onclick="genImage('sb', '${sb._id}')">${sb.images.length ? '🎨 再生成一张' : '🎨 生成分镜图'}</button>
+                            <button onclick="genImage('sb', '${sb._id}')">${sb.images.length ? '🎨 重生分镜图' : '🎨 生成分镜图'}</button>
                             <button class="btn-ghost" onclick="addSbImage('${sb._id}')">📁 添加本地图</button>
                             ${sb.images.length ? `<button class="btn-download" onclick="downloadImage('${sb.images[0].url}', '分镜_${sb.shot_number}.png')">📥 保存原图</button>` : ''}
                             <button onclick="genVideo('${sb._id}')" class="btn-red">生成视频</button>
