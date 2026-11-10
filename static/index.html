@@ -2067,6 +2067,7 @@
                             <div style="margin-top:8px; display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
                                 <a class="btn-download" href="${sb.videoUrl}" download="分镜_${sb.shot_number || i+1}.mp4" style="text-decoration:none; display:inline-block;">📥 保存到电脑</a>
                                 <button class="btn-del-item" onclick="clearSbVideo('${sb._id}')" title="删除视频（同时删除本地文件，不可恢复）">🗑 删除</button>
+                                <button class="btn-del-item" style="background:#1d4ed8; color:#fff;" onclick="continueFromLastFrame('${sb._id}')" title="抽本视频最后一帧，在其后插入新分镜并设为首帧参考（接拍没拍完的镜头）">🎬 接拍下一镜</button>
                             </div>
                         </div>` : ''}
                     </div>
@@ -2346,6 +2347,47 @@
             saveCurrentProject();
             renderStoryboards(currentData.storyData);
             // 滚动到新分镜并聚焦提示词框，方便直接填写
+            setTimeout(() => {
+                const row = document.querySelector(`.storyboard-row[data-id="${newSb._id}"]`);
+                if (row) {
+                    row.scrollIntoView({ behavior: "smooth", block: "center" });
+                    const ta = row.querySelector(".prompt-edit-area");
+                    if (ta) { ta.focus(); autoGrow(ta); }
+                }
+            }, 60);
+        }
+        // 「接拍下一镜」：抽上一视频最后一帧 → 在该分镜后插入新分镜，尾帧图设为首帧参考，视频模式自动切「首帧」
+        async function continueFromLastFrame(sbId) {
+            const sb = (currentData.storyData.storyboards || []).find(s => s._id === sbId);
+            if (!sb || !sb.videoUrl) { alert("该分镜还没有已保存的视频，先生成视频再接拍。"); return; }
+            if (!confirm("将抽取本视频的最后一帧，在它后面插入一条新分镜，并自动把尾帧图设为新分镜的首帧参考（视频模式切到「首帧」）。\\n\\n适合镜头没拍完想接着生成的场景。继续？")) return;
+            let frameUrl = "";
+            try {
+                const resp = await fetch(`${API}/api/video-last-frame`, {
+                    method: "POST", headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ video_url: sb.videoUrl }),
+                });
+                if (!resp.ok) throw new Error((await resp.text().catch(() => "")) || "抽帧失败");
+                const data = await resp.json();
+                frameUrl = data.image_url;
+            } catch (e) { alert("尾帧提取失败：" + e.message); return; }
+            const arr = currentData.storyData.storyboards;
+            const idx = arr.findIndex(s => s._id === sbId);
+            const newSb = {
+                _id: 'sb_' + Date.now() + '_c' + Math.floor(Math.random() * 10000),
+                shot_number: idx + 2,
+                description: "接拍分镜（从上一镜尾帧继续）",
+                dialogue: "", duration: 3,
+                image_prompt: "承接上一镜画面继续",
+                video_prompt: "",
+                images: [{ url: frameUrl, role: "first" }]
+            };
+            arr.splice(idx + 1, 0, newSb);
+            arr.forEach((s, i) => s.shot_number = i + 1);
+            // 视频模式自动切到「首帧」，新分镜滚动到视野并聚焦提示词框
+            const radio = document.querySelector('input[name="videoMode"][value="first_frame"]');
+            if (radio) { radio.checked = true; onVideoModeChange(); }
+            saveCurrentProject(); renderStoryboards(currentData.storyData);
             setTimeout(() => {
                 const row = document.querySelector(`.storyboard-row[data-id="${newSb._id}"]`);
                 if (row) {
@@ -2639,11 +2681,12 @@
                 }
                 // 视频文件 → 所属项目（每个项目的分镜都记录着自己的 videoUrl）
                 const owner = {}; // 文件名 -> 项目id
+                const sbOwner = {}; // 文件名 -> 分镜id（「接拍下一镜」定位插入点用）
                 (projects || []).forEach(p => {
                     (((p.storyData || {}).storyboards) || []).forEach(sb => {
                         if (!sb.videoUrl) return;
                         const fname = String(sb.videoUrl).split("/").pop().split("?")[0];
-                        if (fname && !owner[fname]) owner[fname] = p.id;
+                        if (fname && !owner[fname]) { owner[fname] = p.id; sbOwner[fname] = sb._id; }
                     });
                 });
                 // 资产只在对应的项目里出现：画廊仅展示当前项目的视频
@@ -2657,7 +2700,10 @@
                         <button class="btn-del-item" style="margin-left:0; position:absolute; top:8px; right:8px; z-index:2;" onclick="deleteVideo('${v.name}')">删除</button>
                         <video src="${v.url}" controls style="max-width:280px; width:100%; border-radius:8px; display:block;"></video>
                         <div class="hint" style="margin-top:6px;">${v.name} · ${v.size_mb}MB · ${new Date(v.mtime).toLocaleString()}</div>
-                        <a class="btn-download" href="${v.url}" download="${v.name}" style="display:inline-block; text-decoration:none; margin-top:8px;">📥 保存到电脑</a>
+                        <div style="margin-top:8px; display:flex; gap:8px; flex-wrap:wrap;">
+                            <a class="btn-download" href="${v.url}" download="${v.name}" style="display:inline-block; text-decoration:none;">📥 保存到电脑</a>
+                            ${sbOwner[v.name] ? `<button class="btn-del-item" style="background:#1d4ed8; color:#fff;" onclick="continueFromLastFrame('${sbOwner[v.name]}')" title="抽本视频最后一帧，在其后插入新分镜并设为首帧参考">🎬 接拍下一镜</button>` : ""}
+                        </div>
                     </div>`;
                 let html = "";
                 if (mine.length) {

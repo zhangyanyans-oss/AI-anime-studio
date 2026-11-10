@@ -7,3 +7,4 @@ pypdf
 python-docx
 python-multipart
 Pillow
+opencv-python-headless

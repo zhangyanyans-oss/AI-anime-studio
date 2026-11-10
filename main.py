@@ -2819,6 +2819,47 @@ async def delete_video(name: str):
     os.remove(p)
     return {"ok": True}
 
+class VideoLastFrameRequest(BaseModel):
+    video_url: str  # 本地视频地址（/static/uploads/video_*.mp4，带域名前缀也可）
+
+@app.post("/api/video-last-frame")
+async def video_last_frame(req: VideoLastFrameRequest):
+    """抽取视频最后一帧存为图片——「接拍」用：上一镜没拍完，拿尾帧当下一镜的首帧参考。
+    仅接受本项目生成的本地 video_*.mp4（严格校验文件名，防路径穿越）。"""
+    fname = (req.video_url or "").split("?")[0].rstrip("/").split("/")[-1]
+    if not re.fullmatch(r"video_[\w\-]+\.mp4", fname):
+        raise HTTPException(400, "仅支持本项目生成的 video_*.mp4 本地视频")
+    path = os.path.join("static", "uploads", fname)
+    if not os.path.exists(path):
+        raise HTTPException(404, f"找不到本地视频文件 {fname}（可能已被删除，请先在画廊里重新保存）")
+    try:
+        import cv2
+    except ImportError:
+        raise HTTPException(500, "服务器缺少 opencv-python-headless，请在 venv 里执行：pip install opencv-python-headless")
+    cap = cv2.VideoCapture(path)
+    frame = None
+    try:
+        total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
+        # 优先跳到最后整数帧读取；seek 失败（某些编码元数据不准）则顺序解码兜底
+        if total > 0:
+            cap.set(cv2.CAP_PROP_POS_FRAMES, max(total - 2, 0))
+            ok, frame = cap.read()
+        if frame is None:
+            cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+            while True:
+                ok, f2 = cap.read()
+                if not ok:
+                    break
+                frame = f2
+    finally:
+        cap.release()
+    if frame is None:
+        raise HTTPException(500, "抽帧失败：视频可能已损坏或为空")
+    os.makedirs("static/uploads", exist_ok=True)
+    out_name = f"frame_{uuid.uuid4().hex[:10]}.jpg"
+    cv2.imwrite(os.path.join("static", "uploads", out_name), frame, [cv2.IMWRITE_JPEG_QUALITY, 92])
+    return {"image_url": f"/static/uploads/{out_name}", "source_video": fname}
+
 # ---------- 6. 清理临时文件（可选后台任务） ----------
 def clean_temp_files():
     """清理超过 24 小时的临时图片文件"""
