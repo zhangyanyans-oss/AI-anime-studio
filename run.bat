@@ -1,34 +1,75 @@
 @echo off
-chcp 65001 >nul
-title AI åŠ¨ç”»å·¥ä½œå°å¯åŠ¨å™¨
+title AI ¶¯»­¹¤×÷Ì¨Æô¶¯Æ÷
+cd /d "%~dp0"
+
 echo =========================================
-echo       ðŸŽ¬ AI åŠ¨ç”»å·¥ä½œå° - æ­£åœ¨å¯åŠ¨
+echo       AI ¶¯»­¹¤×÷Ì¨ - ÕýÔÚÆô¶¯
 echo =========================================
 echo.
 
-:: 1. æ£€æŸ¥è™šæ‹ŸçŽ¯å¢ƒæ˜¯å¦å­˜åœ¨
-if not exist "venv\Scripts\activate.bat" (
-    echo [é”™è¯¯] æœªæ‰¾åˆ°è™šæ‹ŸçŽ¯å¢ƒ "venv" æ–‡ä»¶å¤¹ï¼
-    echo è¯·å…ˆåœ¨å½“å‰ç›®å½•æ‰“å¼€å‘½ä»¤è¡Œï¼Œè¾“å…¥ï¼špython -m venv venv
-    echo ç„¶åŽæ¿€æ´»å¹¶å®‰è£…ä¾èµ–ã€‚
+:: 1. ÕÒÒ»¸ö¿ÉÓÃµÄ Python£¨ÓÅÏÈ 3.13/3.11 µÈ³ÉÊì°æ±¾£»
+::    ¹ýÐÂµÄ°æ±¾¿ÉÄÜÈ±ÉÙ pydantic µÈ°üµÄÔ¤±àÒëÂÖ×Óµ¼ÖÂ×°ÒÀÀµÊ§°Ü£©
+set "PYCMD="
+py -3.13 -c "import sys" >nul 2>&1 && set "PYCMD=py -3.13"
+if not defined PYCMD py -3.12 -c "import sys" >nul 2>&1 && set "PYCMD=py -3.12"
+if not defined PYCMD py -3.11 -c "import sys" >nul 2>&1 && set "PYCMD=py -3.11"
+if not defined PYCMD py -3 -c "import sys" >nul 2>&1 && set "PYCMD=py -3"
+if not defined PYCMD python -c "import sys" >nul 2>&1 && set "PYCMD=python"
+if not defined PYCMD (
+    echo [´íÎó] Î´ÕÒµ½ Python£¬ÇëÏÈ°²×° Python 3.11 »ò¸ü¸ß°æ±¾¡£
+    echo ÏÂÔØµØÖ·: https://www.python.org/downloads/
+    echo °²×°Ê±Îñ±Ø¹´Ñ¡ "Add python.exe to PATH"¡£
+    echo.
     pause
-    exit /b
+    exit /b 1
+)
+echo [0/3] Ê¹ÓÃ Python: %PYCMD%
+echo.
+
+:: 2. ÐéÄâ»·¾³²»´æÔÚÔò×Ô¶¯´´½¨£¨Ê×´ÎÔËÐÐÔ¼¼¸Ê®Ãë£©
+if not exist "venv\Scripts\activate.bat" (
+    echo [1/3] Ê×´ÎÔËÐÐ£¬ÕýÔÚ´´½¨ÐéÄâ»·¾³...
+    %PYCMD% -m venv venv
+    if errorlevel 1 (
+        echo [´íÎó] ÐéÄâ»·¾³´´½¨Ê§°Ü£¬Çë½ØÍ¼±¾´°¿ÚµÄ±¨´íÐÅÏ¢·´À¡¡£
+        echo.
+        pause
+        exit /b 1
+    )
 )
 
-:: 2. æ¿€æ´»è™šæ‹ŸçŽ¯å¢ƒ
-echo [1/2] æ­£åœ¨æ¿€æ´»è™šæ‹ŸçŽ¯å¢ƒ...
+:: 3. ¼¤»îÐéÄâ»·¾³£¨´Ëºó python ¶¼Ö¸Ïò venv ÄÚµÄ½âÊÍÆ÷£©
 call venv\Scripts\activate.bat
 
-:: 3. å¯åŠ¨ Uvicorn æœåŠ¡
-echo [2/2] æ­£åœ¨å¯åŠ¨åŽç«¯æœåŠ¡ï¼Œè¯·å‹¿å…³é—­æ­¤çª—å£...
+:: 4. ÒÀÀµ²»Æë¾Í×Ô¶¯°²×°£¨¹Ø¼ü°ü¿Éµ¼ÈëÊÓÎªÒÀÀµÆëÈ«£©
+python -c "import uvicorn, fastapi, httpx, dotenv, PIL, multipart, openai" >nul 2>&1
+if errorlevel 1 (
+    echo [2/3] ÕýÔÚ°²×°ÒÀÀµ£¬Ê×´ÎÔ¼ 1-2 ·ÖÖÓ£¬ÇëÄÍÐÄµÈ´ý...
+    python -m pip install -q -r requirements.txt
+    if errorlevel 1 (
+        echo Ä¬ÈÏÔ´°²×°Ê§°Ü£¬¸ÄÓÃÇå»ª¾µÏñÖØÊÔ...
+        python -m pip install -q -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
+        if errorlevel 1 (
+            echo [´íÎó] ÒÀÀµ°²×°Ê§°Ü£¬Çë¼ì²éÍøÂçºóÖØÐÂÔËÐÐ±¾³ÌÐò¡£
+            echo.
+            pause
+            exit /b 1
+        )
+    )
+)
+
+:: 5. Æô¶¯·þÎñ
+echo [3/3] ÕýÔÚÆô¶¯ºó¶Ë·þÎñ£¬ÇëÎð¹Ø±Õ´Ë´°¿Ú...
 echo.
-echo     ^> å¯åŠ¨æˆåŠŸåŽï¼Œè¯·åœ¨æµè§ˆå™¨æ‰“å¼€: http://127.0.0.1:8000
-echo     ^> æŒ‰ Ctrl+C å¯ä»¥åœæ­¢æœåŠ¡
+echo     ^> Æô¶¯³É¹¦ºó£¬ÇëÔÚä¯ÀÀÆ÷´ò¿ª: http://127.0.0.1:8000
+echo     ^> °´ Ctrl+C ¿ÉÒÔÍ£Ö¹·þÎñ
 echo.
 echo =========================================
 
-:: å¯åŠ¨æœåŠ¡ï¼ˆä½¿ç”¨ --reload å¯ä»¥åœ¨ä½ ä¿®æ”¹ä»£ç åŽè‡ªåŠ¨é‡å¯ï¼‰
-uvicorn main:app --reload
+:: Æô¶¯·þÎñ£¨--reload ÐÞ¸Ä´úÂëºó×Ô¶¯ÖØÆô£»ÓÃ python -m ·½Ê½µ÷ÓÃ¸ü¿É¿¿£©
+python -m uvicorn main:app --reload
 
-:: å¦‚æžœæœåŠ¡å´©æºƒæˆ–è¢«å…³é—­ï¼Œæš‚åœä¸€ä¸‹ä»¥ä¾¿çœ‹æ¸…æŠ¥é”™ä¿¡æ¯
+:: ·þÎñ±ÀÀ£»ò±»¹Ø±ÕÊ±ÔÝÍ££¬ÒÔ±ã¿´Çå±¨´íÐÅÏ¢
+echo.
+echo ·þÎñÒÑÍË³ö¡£Èç¹ûÉÏ·½ÓÐ±¨´íÐÅÏ¢£¬Çë½ØÍ¼·´À¡¡£
 pause

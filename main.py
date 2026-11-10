@@ -9,6 +9,7 @@ import shutil
 import asyncio
 import zipfile
 from urllib.parse import quote
+from pathlib import Path
 from typing import List, Dict, Any
 from fastapi import FastAPI, HTTPException, Query, File, UploadFile
 from fastapi.staticfiles import StaticFiles
@@ -158,7 +159,7 @@ class VideoRequest(BaseModel):
     frame_mode: str = "reference"  # reference=参考图 / first_frame=首帧 / last_frame=尾帧 / first_last=首尾帧过渡
     first_frame_url: str | None = None  # 首帧模式下作为视频第一帧的图
     last_frame_url: str | None = None   # 尾帧模式下作为视频最后一帧的图
-    image_aspect: float | None = None   # 首张参考图的宽/高比（前端计算传入），用于自动选横竖屏档位
+    image_aspect: float | None = None   # 首张参考图的宽/高比（前端计算传入），用于自动选横竖屏档位；未传时后端 Pillow 本地实测兜底
     plot_data: dict | None = None       # 调度图坐标数据（轨迹图优先），翻译成自然语言运动轨迹指令注入视频提示词
 
 class BrainstormRequest(BaseModel):
@@ -166,6 +167,7 @@ class BrainstormRequest(BaseModel):
     messages: List[Dict[str, Any]]
     user_input: str
     image_base64: str | None = None
+    image_base64_list: List[str] | None = None   # 多图附件（与 image_base64 合并，image_base64 排最前）
 
 class RegeneratePromptRequest(BaseModel):
     type: str  # character / scene / storyboard
@@ -205,14 +207,17 @@ async def brainstorm(req: BrainstormRequest):
     for msg in req.messages:
         messages.append(msg)
     
-    if req.user_input or req.image_base64:
+    all_images = list(req.image_base64_list or [])
+    if req.image_base64:
+        all_images.insert(0, req.image_base64)   # 兼容旧前端/粘贴单图路径，排最前
+    if req.user_input or all_images:
         content = []
         if req.user_input:
             content.append({"type": "text", "text": req.user_input})
-        if req.image_base64:
+        for b64 in all_images:
             content.append({
                 "type": "image_url",
-                "image_url": {"url": f"data:image/jpeg;base64,{req.image_base64}"}
+                "image_url": {"url": f"data:image/jpeg;base64,{b64}"}
             })
         
         if len(content) == 1 and content[0]["type"] == "text":
@@ -387,7 +392,11 @@ async def regenerate_prompt(req: RegeneratePromptRequest):
         anchors = "；".join(
             f"{str(c.get('name') or '')}：{str(c.get('image_prompt') or '')}" for c in req.characters
         )
-        user_lines.append(f"角色外观锚点（用户提示词里没写外貌细节时才参考复用；若与用户当前版本的提示词冲突，以用户提示词为准）：{anchors}")
+        user_lines.append(
+            f"角色外观锚点（导演在角色卡上最终确定的最新外貌，权威基准）：{anchors}\n"
+            "  重写规则：用户当前提示词里与锚点矛盾的过时外貌描述（性别/发型/体格/五官等）必须更新为锚点版本，不得原样保留；"
+            "仅当提示词明确写了与锚点不同的服装或造型（剧情需要换装）时，该处按提示词执行，其余外貌特征仍按锚点。"
+        )
     user_lines.append(f"要重写的提示词类型：{type_label}")
     if req.name:
         user_lines.append(f"名称：{req.name}")
@@ -549,11 +558,16 @@ DIAGRAM_PLOT_PROMPT = """你是调度图纸数据员。把导演的调度口述�
 }
 【规则】
 1. 导演口述是最高优先级，逐条落实为坐标；口述中的「画左/画右/画上方/画下方」直接对应图纸左/右/上/下。
-2. props：按场景描述列出主要陈设的俯视投影（水箱、桌、床、门等），x,y 为中心点、w,h 为宽高（均为 0-1）。
-3. characters：只包含出场角色；口述未提及位置的角色按剧情合理推断放置，并在 note 中注明。有移动的给 path（按时间顺序 2-6 个拐点）与 stops（与拐点对应）。
-4. camera：机位位置与拍摄朝向；movement 为「固定机位」时 path 为空数组；fov 缺省 55。
-5. 所有坐标数值必须在 0-1 范围内。
-6. 若用户提供「现有俯视调度图坐标」（权威起点数据）：它是同一空间同一时刻的既成事实，所有角色的起点 x,y 与朝向必须照抄该数据中同名角色的值，严禁重新安排站位或凭剧情重新布局；轨迹 path 必须从该起点出发，只解析口述中提到的移动/朝向变化，未提及移动的角色停在原位（path 空数组、朝向照抄）；陈设 props 与机位起点同样照抄该数据，仅当口述明确说机位移动时才给 camera.path。"""
+2. 【「镜头」＝「机位」语义（极重要）】口述里的「镜头」「摄影机」「机位」一律指 camera 机位符号所在的那个坐标点（机位的 x,y），绝不是"图纸下方""图纸上方""画面外观众方向"或"空间近端"：
+   - 「走向镜头／走向机位／走到镜头前／冲向镜头／走近摄影机／来到镜头前」：该角色 path 终点必须落在机位附近（距机位约 0.05~0.15，不与机位精确重叠），path 就是起点→机位的两点一线（最多加 1 个轻微顺路拐点，整体仍近似直线），并把 facing 改为面向机位；终点不得留在原地、也不得偏向图纸下/上方。
+   - 「远离镜头／退向画面纵深／走向远处」：沿"起点→机位"连线的反方向拉开距离，facing 改为背向机位。
+   - 机位在哪，"镜头前"就在哪——先看机位坐标，再落轨迹终点。
+3. props：按场景描述列出主要陈设的俯视投影（水箱、桌、床、门等），x,y 为中心点、w,h 为宽高（均为 0-1）。
+4. characters：只允许使用【出场角色】名单里的名字（输出必须与名单逐字一致）。导演口述中若用了名单外的称呼（昵称、绰号、随口叫的名字，如把"胖虎"叫成"小胖"），必须按剧情与角色描述判断它实际指名单中的哪一位，映射成名单名输出，并在 note 中注明映射关系（如"口述的小胖=胖虎"）；严禁发明名单外的角色名，同名角色只能出现一次；名单中实际出场的角色一个都不能少，口述未提及位置的角色按剧情合理推断放置并在 note 中注明。有移动的给 path（按时间顺序 2-6 个拐点）与 stops（与拐点对应）。
+   【动谁停谁（极重要）】path 只给「口述中明确点到名字且描述了移动」的角色；口述里没出现名字的角色一律 path 空数组、stops 空数组、朝向照抄起点，严禁因为剧情氛围或画面描述里的其他动作就替他安排走位（实测教训：口述只说"小帅走向镜头"，AI 让小美也走了——错误）。
+5. camera：机位位置与拍摄朝向；movement 为「固定机位」时 path 为空数组；fov 缺省 55。
+6. 所有坐标数值必须在 0-1 范围内。
+7. 若用户提供「现有俯视调度图坐标」（权威起点数据）：它是同一空间同一时刻的既成事实，所有角色的起点 x,y 与朝向必须照抄该数据中同名角色的值，严禁重新安排站位或凭剧情重新布局；轨迹 path 必须从该起点出发，只解析口述中提到的移动/朝向变化，未提及移动的角色停在原位（path 空数组、朝向照抄）；陈设 props 与机位起点同样照抄该数据，仅当口述明确说机位移动时才给 camera.path。"""
 
 def _fallback_plot(req: TopViewRequest) -> dict:
     """DeepSeek 解析失败时的默认布局（明确告知用户重试）。"""
@@ -580,6 +594,94 @@ def _clamp01(v) -> float:
         return min(1.0, max(0.0, float(v)))
     except (TypeError, ValueError):
         return 0.5
+
+
+def _name_match(a: str, b: str) -> bool:
+    """宽松名字匹配：完全相等 / 互为子串 / 去掉'小''阿''老'前缀后相等 / 单字重叠≥一半。
+    用于把口述里的昵称（小胖/憨憨）对齐回角色名单（胖虎/陈屿）。"""
+    a, b = a.strip(), b.strip()
+    if not a or not b:
+        return False
+    if a == b or a in b or b in a:
+        return True
+    strip = lambda s: s.lstrip("小阿老")
+    if strip(a) == strip(b):
+        return True
+    common = set(a) & set(b)
+    return len(common) / max(len(set(a)), len(set(b))) >= 0.5 and len(common) >= 1
+
+
+def _align_character_names(plot: dict, cast: list) -> dict:
+    """把 AI 解析出的角色名强制对齐到项目角色名单。
+    口述里的昵称/记错的名字若被 DeepSeek 照抄成新角色，图纸就会出现两套人马：
+    调度约束与分镜提示词名字对不上 → 生图重复画人（两个"小胖"）、位置错乱。
+    策略：精确/宽松匹配映射 → 完全对不上时按出场顺序映射 → 多出的丢弃 → 名单缺的补齐。"""
+    canonical = []
+    for c in cast or []:
+        n = str((c or {}).get("name") or "").strip()
+        if n and n not in canonical:
+            canonical.append(n)
+    if not canonical:
+        return plot
+    # 名字→描述文本（昵称对不上名字时，用描述里的特征字兜底，如"小胖"→胖虎描述里的"偏胖"）
+    desc_of = {}
+    for c in cast or []:
+        n = str((c or {}).get("name") or "").strip()
+        if n:
+            desc_of[n] = str((c or {}).get("description") or "")
+    ai_chars = [c for c in (plot.get("characters") or [])
+                if isinstance(c, dict) and str(c.get("name") or "").strip()]
+    if not ai_chars:
+        return plot
+
+    notes = []
+    mapped, used = [], set()
+    unmatched = []
+    strip = lambda s: s.lstrip("小阿老").strip()
+    for c in ai_chars:
+        raw = str(c.get("name")).strip()
+        target = next((n for n in canonical if n not in used and _name_match(raw, n)), None)
+        if not target:
+            # 描述特征匹配：昵称的特征字（去掉小/阿/老前缀）出现在角色描述里
+            nick = strip(raw)
+            if nick:
+                target = next((n for n in canonical if n not in used and nick in desc_of[n]), None)
+        if target:
+            if raw != target:
+                notes.append(f"口述的{raw}={target}")
+            c["name"] = target
+            used.add(target)
+            mapped.append(c)
+        else:
+            unmatched.append(c)
+
+    # 对不上的按出场顺序映射到名单中未占用的名字（口述顺序通常对应角色出场顺序，
+    # 保住口述落位布局比丢弃更有价值；超出的才是真正该忽略的多余角色）
+    unused = [n for n in canonical if n not in used]
+    for i, c in enumerate(unmatched):
+        if i >= len(unused):
+            notes.append(f"忽略名单外角色{c.get('name')}")
+            continue
+        notes.append(f"口述的{c['name']}={unused[i]}")
+        c["name"] = unused[i]
+        used.add(unused[i])
+        mapped.append(c)
+
+    # 名单中实际出场但 AI 漏掉的：补默认站位（避免图纸少人、与分镜提示词又对不上）
+    missing = [n for n in canonical if n not in used]
+    for i, n in enumerate(missing):
+        mapped.append({"name": n, "x": (len(mapped) % 4 + 1) / 5, "y": 0.5,
+                       "facing": 180, "path": [], "stops": []})
+    if missing:
+        notes.append("补齐未提及角色：" + "、".join(missing))
+
+    plot["characters"] = mapped
+    if notes:
+        prev = str(plot.get("note") or "").strip()
+        plot["note"] = (prev + ("；" if prev else "") + "；".join(notes))[:200]
+    return plot
+
+
 
 
 def _merge_base_plot(plot: dict, base: dict) -> dict:
@@ -659,9 +761,14 @@ def _normalize_plot(plot: dict) -> dict:
             "h": min(1.0, max(0.02, _clamp01(p.get("h")) or 0.1)),
         })
     characters = []
+    seen_names = set()
     for c in (plot.get("characters") or [])[:10]:
         if not isinstance(c, dict) or not str(c.get("name") or "").strip():
             continue
+        cname = str(c.get("name")).strip()
+        if cname in seen_names:
+            continue  # 同名去重：任何路径产出两个同名角色都只保留第一个，杜绝图上两个"小胖"
+        seen_names.add(cname)
         path = []
         for pt in (c.get("path") or [])[:8]:
             if isinstance(pt, (list, tuple)) and len(pt) >= 2:
@@ -711,13 +818,16 @@ def _frame_side_text(cross: float, dist: float, fov: float) -> str:
     return ("画面右侧" if lat_deg > 0 else "画面左侧") + edge
 
 
-def _camera_view_summary(plot: dict) -> str:
-    """按坐标几何计算机位视野：谁在镜头前方（入画，近→远）、谁在机位旁/镜头后方（绝不入画）。
-    这是权威事实，直接注入分镜生图约束，杜绝"从主角位置拍过去"的反向理解。"""
+def compute_camera_facts(plot: dict) -> dict:
+    """【唯一几何真相源】把调度图坐标一次性算成机位视野的结构化事实。
+    机位视野摘要、坐标翻译、AI 镜头翻译全部从这里取数——只算一次、口径只有一套，
+    杜绝多处各算一套、补丁打不穷尽的问题。
+    关键口径：透视成像大小 ∝ 1/沿视线投影深度 depth = vx*fx + vy*fy（不除以距离——
+    除以距离就退化成视线夹角余弦，站在机位正前方的人无论多远都会被误判成"最近/最大"）。"""
     import math
     cam = plot.get("camera") or {}
     cx, cy = float(cam.get("x", 0.5)), float(cam.get("y", 0.95))
-    facing = float(cam.get("facing") or 0)
+    facing = float(cam.get("facing") or 0) % 360
     fov = float(cam.get("fov") or 55)
     rad = math.radians(facing)
     fx, fy = math.sin(rad), -math.cos(rad)
@@ -730,72 +840,85 @@ def _camera_view_summary(plot: dict) -> str:
         name = str(c.get("name") or "").strip()
         if not name:
             continue
-        vx, vy = float(c.get("x", 0)) - cx, float(c.get("y", 0)) - cy
+        px, py = float(c.get("x", 0)), float(c.get("y", 0))
+        vx, vy = px - cx, py - cy
         dist = math.hypot(vx, vy)
+        pf = float(c.get("facing") or 0) % 360
+        facing_desc = _facing_relative_to_camera(pf, vx, vy, dist, rad)
         if dist < 1e-6:
-            hidden.append((name, 0.0, None, "就在机位上（视角人物，镜头从他眼中拍出）"))
+            hidden.append({"name": name, "reason": "就站在机位上（视角人物，镜头从他眼中拍出）",
+                           "facing_desc": facing_desc, "side": "", "plan_dir": "", "angle": 0.0})
             continue
-        dot = (vx * fx + vy * fy) / dist
-        angle = math.degrees(math.acos(max(-1.0, min(1.0, dot))))
-        # cross>0 → 人物在机位视线右侧（即成片画面右侧）
-        side = _frame_side_text(fx * vy - fy * vx, dist, fov)
+        depth = vx * fx + vy * fy          # 沿视线方向投影深度：透视成像 ∝ 1/depth
+        dot_norm = depth / dist            # 视线夹角余弦（仅用于算视偏角，不当远近用）
+        angle = math.degrees(math.acos(max(-1.0, min(1.0, dot_norm))))
+        cross = fx * vy - fy * vx
+        side = _frame_side_text(cross, dist, fov)
+        plan_dir = dir_desc[min(((abs(pf - k), k) for k in dir_desc))[1]].replace("图纸", "面朝图纸")
         if dist <= 0.15:
-            hidden.append((name, dist, None, "紧贴机位（就在镜头旁边，不入画）"))
-        elif dot <= 0:
-            hidden.append((name, dist, None, "在镜头后方（机位身后，不入画）"))
+            hidden.append({"name": name, "reason": f"紧贴机位（就在镜头旁边，不入画）",
+                           "facing_desc": facing_desc, "side": side, "plan_dir": plan_dir, "angle": angle})
+        elif depth <= 0:
+            hidden.append({"name": name, "reason": "在机位身后（镜头后方，不入画）",
+                           "facing_desc": facing_desc, "side": side, "plan_dir": plan_dir, "angle": angle})
         elif angle > fov / 2 + 25:
-            hidden.append((name, dist, None, "在机位视野范围之外（不入画）"))
+            hidden.append({"name": name, "reason": "在机位视野范围之外（不入画）",
+                           "facing_desc": facing_desc, "side": side, "plan_dir": plan_dir, "angle": angle})
         else:
-            facing_desc = _facing_relative_to_camera(float(c.get("facing") or 0), vx, vy, dist, rad)
-            visible.append((name, dist, angle, side, facing_desc))
-    visible.sort(key=lambda t: t[1])
+            visible.append({"name": name, "dist": dist, "depth": depth, "angle": angle, "side": side,
+                            "facing_desc": facing_desc, "plan_dir": plan_dir,
+                            "near_edge": angle > fov / 2 + 10})
+    # 升序：投影深度最小（离镜头最近、画面里最大）在前
+    visible.sort(key=lambda c: c["depth"])
+    d0 = visible[0]["depth"] if visible else 0.0
+    for i, c in enumerate(visible):
+        if i == 0 or d0 <= 1e-6:
+            c["size_pct"] = 100
+        else:
+            # 画面大小 ∝ 1/depth：相对最近者的大小 = d0 / depth
+            c["size_pct"] = max(int((d0 / max(c["depth"], 1e-6) * 100) // 5 * 5), 5)
+    return {"camera": {"x": cx, "y": cy, "facing": facing, "fov": fov, "dir_name": dir_name},
+            "visible": visible, "hidden": hidden}
 
-    lines = [f"镜头架在「机位」符号处、朝{dir_name}方向拍摄（视锥约{int(fov)}°）——画面就是从机位望出去的景象。"]
+
+def _camera_view_summary(plot: dict) -> str:
+    """按坐标几何计算机位视野：谁在镜头前方（入画，近→远）、谁在机位旁/镜头后方（绝不入画）。
+    这是权威事实，直接注入分镜生图约束，杜绝"从主角位置拍过去"的反向理解。
+    全部几何结论取自唯一真相源 compute_camera_facts。"""
+    facts = compute_camera_facts(plot)
+    cam = facts["camera"]
+    visible, hidden = facts["visible"], facts["hidden"]
+    lines = [f"镜头架在「机位」符号处、朝{cam['dir_name']}方向拍摄（视锥约{int(cam['fov'])}°）——画面就是从机位望出去的景象。"]
     if visible:
         n = max(len(visible) - 1, 1)
         seg = []
-        for i, (name, dist, angle, side, facing_desc) in enumerate(visible):
-            depth = "离镜头最近" if i == 0 else ("最远" if i == n else "中距")
+        for i, c in enumerate(visible):
+            size_txt = "画面里最大" if i == 0 else f"画面大小约为最近者的{c['size_pct']}%"
+            depth = "离镜头最近" if i == 0 else ("离镜头最远" if i == n else f"离镜头第{i+1}近")
             vert = "位于画面下缘" if i == 0 else ("靠近画面上缘地平线" if i == n else "位于画面纵深中部")
-            edge = "，靠近视野边缘可能被裁切" if angle > fov / 2 + 10 else ""
-            seg.append(f"{name}（{vert}、{depth}、{side}、{facing_desc}{edge}）")
-        lines.append("机位前方视野内、会出现在画面中（从近到远）：" + "、".join(seg) + "。")
+            edge = "，靠近视野边缘可能被裁切" if c["near_edge"] else ""
+            seg.append(f"{c['name']}（{vert}、{depth}、{size_txt}、{c['side']}、{c['facing_desc']}{edge}）")
+        lines.append("机位前方视野内、会出现在画面中（从近到远）：" + "、".join(seg) + "。"
+                     + "「画面大小约为最近者的X%」由程序按沿视线方向的真实深度透视换算：百分比相同的人在画面中画成一样大，相差≥20%时大小差异必须明显可辨。")
     else:
         lines.append("机位前方视野内没有人物（画面以环境空镜为主）。")
     if hidden:
         lines.append("以下人物站在机位上/机位旁/镜头后方或视野之外，绝不能出现在画面中：" +
-                     "；".join(f"{n}（{why}）" for n, _, _, why in hidden) + "。")
+                     "；".join(f"{c['name']}（{c['reason']}）" for c in hidden) + "。")
     lines.append("此名单由程序按调度图纸坐标计算，是权威事实：机位的位置与朝向、谁入画谁不入画、每人的画面左右与身体朝向都以本事实为准；"
                  "导演口述文字若与图纸「机位」符号不符（例如导演手动移过机位后口述仍写旧位置），口述中的机位描述作废，按本事实执行。")
     return "".join(lines)
 
 
 def _visible_character_names(plot: dict) -> list[str] | None:
-    """按机位几何计算本镜头"入画人物名单"（与 _camera_view_summary 同一套判定）。
+    """按机位几何计算本镜头"入画人物名单"（取自唯一真相源 compute_camera_facts）。
     无有效 plot 数据时返回 None（表示不过滤）。视角人物（站在机位上）不入画。"""
-    import math
     if not isinstance(plot, dict):
         return None
     chars = [c for c in (plot.get("characters") or []) if str(c.get("name") or "").strip()]
     if not chars:
         return None
-    cam = plot.get("camera") or {}
-    cx, cy = float(cam.get("x", 0.5)), float(cam.get("y", 0.95))
-    rad = math.radians(float(cam.get("facing") or 0))
-    fx, fy = math.sin(rad), -math.cos(rad)
-    fov = float(cam.get("fov") or 55)
-    visible = []
-    for c in chars:
-        name = str(c.get("name")).strip()
-        vx, vy = float(c.get("x", 0)) - cx, float(c.get("y", 0)) - cy
-        dist = math.hypot(vx, vy)
-        if dist < 1e-6:
-            continue  # 视角人物：镜头从他眼中拍出，本人不出现在画面
-        dot = (vx * fx + vy * fy) / dist
-        angle = math.degrees(math.acos(max(-1.0, min(1.0, dot))))
-        if dist > 0.15 and dot > 0 and angle <= fov / 2 + 25:
-            visible.append(name)
-    return visible
+    return [c["name"] for c in compute_camera_facts(plot)["visible"]]
 
 
 def _facing_relative_to_camera(pf: float, vx: float, vy: float, dist: float, cam_rad: float) -> str:
@@ -823,78 +946,52 @@ def format_plot_to_prompt(plot: dict, dynamic: bool = False) -> str:
     生图模型读不懂白底俯视图上的圆点与扇形，但读得懂"谁离镜头最近、在画面哪一侧"。
     dynamic=False（分镜图）：名单描述初始帧＝全部画面，视野外角色绝对禁足；
     dynamic=True（生视频）：名单只约束0秒初始帧，之后谁入画由走位与镜头运动推演——
-    走向镜头外的人、镜头跟随都可能让视野外的人自然入画，不能一刀切禁足。"""
+    走向镜头外的人、镜头跟随都可能让视野外的人自然入画，不能一刀切禁足。
+    几何结论全部取自唯一真相源 compute_camera_facts（本函数是程序直译兜底；
+    正常路径走 synthesize_shot_brief 的 AI 镜头翻译）。"""
     import math
     if not isinstance(plot, dict):
         return ""
-    cam = plot.get("camera") or {}
+    facts = compute_camera_facts(plot)
     chars = [c for c in (plot.get("characters") or []) if str(c.get("name") or "").strip()]
-    if not chars and not cam:
+    if not chars and not plot.get("camera"):
         return ""
-    cx, cy = float(cam.get("x", 0.5)), float(cam.get("y", 0.95))
-    facing = float(cam.get("facing") or 0) % 360
-    fov = float(cam.get("fov") or 55)
-    rad = math.radians(facing)
-    fx, fy = math.sin(rad), -math.cos(rad)
-    dir_desc = {0: "图纸上方", 45: "图纸右上方", 90: "图纸右方", 135: "图纸右下方",
-                180: "图纸下方", 225: "图纸左下方", 270: "图纸左方", 315: "图纸左上方"}
-    dir_name = dir_desc[min(((abs(facing - k), k) for k in dir_desc))[1]]
+    cam = facts["camera"]
+    dir_name = cam["dir_name"]
 
-    lines = [f"【强制机位】镜头架在「机位」符号处，朝{dir_name}方向拍摄，视锥约{int(fov)}°。画面＝从机位望出去的景象。"]
+    lines = [f"【强制机位】镜头架在「机位」符号处，朝{dir_name}方向拍摄，视锥约{int(cam['fov'])}°。画面＝从机位望出去的景象。"]
 
-    # 人物站位：按与机位的几何关系逐人描述（前后/左右/远近排序），生图模型听不懂裸坐标，只听得懂相对关系
-    measured = []
-    for c in chars:
-        name = str(c.get("name")).strip()
-        px, py = float(c.get("x", 0)), float(c.get("y", 0))
-        vx, vy = px - cx, py - cy
-        dist = math.hypot(vx, vy)
-        if dist < 1e-6:
-            measured.append((name, 0.0, None, None, "就站在机位上（视角人物，镜头从他眼中拍出）"))
-            continue
-        dot = (vx * fx + vy * fy) / dist
-        angle = math.degrees(math.acos(max(-1.0, min(1.0, dot))))
-        raw_side = "画面右" if (fx * vy - fy * vx) > 0 else "画面左"
-        side = _frame_side_text(fx * vy - fy * vx, dist, fov)
-        pf = float(c.get("facing") or 0) % 360
-        pdir = dir_desc[min(((abs(pf - k), k) for k in dir_desc))[1]].replace("图纸", "面朝图纸")
-        orient = _facing_relative_to_camera(pf, vx, vy, dist, rad)
-        if dist <= 0.15:
-            measured.append((name, dist, None, None, f"紧贴机位{raw_side}侧（就在镜头旁边，不入画），{orient}"))
-        elif dot <= 0:
-            measured.append((name, dist, None, None, f"在机位身后（镜头后方，不入画），{orient}"))
-        elif angle > fov / 2 + 25:
-            measured.append((name, dist, None, None, f"在机位视野之外（不入画），{orient}"))
-        else:
-            measured.append((name, dist, angle, side, f"在机位前方{side}、{orient}（图纸方位：{pdir}）"))
-
-    visible = sorted([m for m in measured if "前方" in m[4]], key=lambda t: t[1])
-    hidden = [m for m in measured if "前方" not in m[4]]
-    n = max(len(visible) - 1, 1)
+    # 人物站位：程序直译（从近到远）。远近与大小按沿视线投影深度（透视成像 ∝ 1/深度）
+    n = max(len(facts["visible"]) - 1, 1)
     seg = []
-    for i, (name, dist, angle, side, desc) in enumerate(visible):
-        depth = "离镜头最近" if i == 0 else ("离镜头最远" if i == n else "中距")
+    for i, c in enumerate(facts["visible"]):
+        size_txt = "画面里最大" if i == 0 else f"画面大小约为最近者的{c['size_pct']}%"
+        depth_label = "离镜头最近" if i == 0 else ("离镜头最远" if i == n else f"离镜头第{i+1}近")
         vert = "位于画面下缘" if i == 0 else ("靠近画面上缘地平线" if i == n else "位于画面纵深中部")
-        edge = "、靠近视野边缘可能被画面裁切" if angle and angle > fov / 2 + 10 else ""
-        seg.append(f"{name}（{vert}、{depth}、{desc}{edge}）")
+        edge = "、靠近视野边缘可能被画面裁切" if c["near_edge"] else ""
+        seg.append(f"{c['name']}（{vert}、{depth_label}、{size_txt}、{c['side']}、{c['facing_desc']}、{c['plan_dir']}{edge}）")
     if seg:
         title = "【人物站位·初始画面入画名单（0秒时刻，从近到远）】" if dynamic else "【人物站位·入画名单（从近到远）】"
         lines.append(title + "（本名单中的「画面左/右」＝成片图像里观众看到的左/右，"
-                     "已按机位朝向换算，与图纸方位无关）" + "；".join(seg) + "。")
+                     "已按机位朝向换算，与图纸方位无关）" + "；".join(seg) + "。"
+                     "「画面大小约为最近者的X%」由程序按沿视线方向的真实深度透视换算：百分比相同的人在画面中画成一样大，相差≥20%时大小差异必须明显可辨。")
     else:
         lines.append("【人物站位】机位前方视野内没有人物，画面以环境空镜为主。")
+    hidden = facts["hidden"]
     if hidden:
         if dynamic:
             # 视频：名单只约束初始帧。走位/镜头运动可能把视野外的人带进画面，不能一刀切禁足
             hidden_desc = []
             for m in hidden:
-                d = (m[4].replace("（就在镜头旁边，不入画）", "（就在镜头旁边）")
+                d = (m["reason"].replace("（就在镜头旁边，不入画）", "（就在镜头旁边）")
                          .replace("（镜头后方，不入画）", "（镜头后方）")
                          .replace("（不入画）", ""))
-                hidden_desc.append(f"{m[0]}（初始画面不在镜头视野内：{d}）")
+                extra = f"、{m['facing_desc']}" if m.get("facing_desc") else ""
+                hidden_desc.append(f"{m['name']}（初始画面不在镜头视野内：{d}{extra}）")
             lines.append("【人物站位·初始不在画面名单（0秒时刻）】" + "；".join(hidden_desc) + "。")
         else:
-            lines.append("【人物站位·绝不入画名单】" + "；".join(f"{m[0]}（{m[4]}）" for m in hidden) + "。")
+            lines.append("【人物站位·绝不入画名单】" + "；".join(
+                f"{m['name']}（{m['reason']}{('，' + m['facing_desc']) if m.get('facing_desc') else ''}）" for m in hidden) + "。")
     if dynamic:
         lines.append("【透视规则·视频】离机位越近的人画面里越大（可为前景，可能只露腿部/肩膀/背影），越远越小、靠近地平线；"
                      "同一地面人物身高一致，纵深相近者大小相近。"
@@ -918,6 +1015,7 @@ def format_plot_to_prompt(plot: dict, dynamic: bool = False) -> str:
 
     # 运动路线（轨迹图）：拐点翻译成镜头相对方向（往画面哪边走、靠近/远离镜头），不甩裸坐标
     cam_facing = float(cam.get("facing") or 0)
+    cx, cy = cam["x"], cam["y"]
 
     def _dir8(dx: float, dy: float) -> str:
         """位移向量 → 镜头相对运动方向描述（以机位视线为正前方）。"""
@@ -948,7 +1046,7 @@ def format_plot_to_prompt(plot: dict, dynamic: bool = False) -> str:
         return "纵深基本持平"
 
     moves = []
-    hidden_names = {m[0] for m in hidden}  # 机位几何判定不入画的角色名
+    hidden_names = {m["name"] for m in hidden}  # 机位几何判定不入画的角色名
     for c in chars:
         path = c.get("path") or []
         if not (path and str(c.get("name")).strip()):
@@ -997,6 +1095,224 @@ def format_plot_to_prompt(plot: dict, dynamic: bool = False) -> str:
     if moves:
         lines.append("【运动路线】" + "；".join(moves) + "。运动要平滑连续，走位方向与快慢以上述路线为准。")
     return "\n".join(lines) + "\n"
+
+
+# ---------- 2.70 顶层镜头翻译：坐标几何（程序）+ 画面语言（DeepSeek）一次性产出统一 JSON ----------
+# 设计动机：不再零打碎敲地给"距离/大小/左右"公式打补丁——程序只算数学上不会错的硬事实
+# （谁入画、投影深度次序、大小百分比、画面左右、身体朝向），DeepSeek 负责把这些事实
+# 翻译成生图/生视频模型听得懂的"镜头画面 JSON"（景别、构图、遮挡、间距、布局描述）。
+# 程序对返回 JSON 做硬校验：几何结论与程序事实冲突处一律以程序为准；调用失败自动回退程序直译。
+
+_SHOT_BRIEF_CACHE: dict[str, dict] = {}   # key = sha1(plot+画面描述+dynamic) → 校验后的 brief JSON
+
+SHOT_TRANSLATE_SYSTEM_PROMPT = """你是资深摄影指导兼镜头翻译官。输入有两部分：
+①调度图纸的坐标数据（俯视图，0-1 归一化坐标：x 右为正、y 下为正；camera=机位位置/朝向/视锥，facing 0=图纸上方、90=右方、180=下方、270=左方；characters=人物位置/朝向/轨迹；props=陈设）；
+②程序按坐标算好的机位几何事实（visible=入画名单已按离镜头由近到远排序，含每人的 depth_rank 近远次序、size_percent 画面大小百分比、frame_side 画面左右、facing 身体朝向、near_edge 是否贴近视野边缘；hidden=绝不入画名单）。
+
+几何事实是权威，不可更改：谁入画谁不入画、近远次序、大小百分比、画面左右、身体朝向一律照抄，禁止用你的直觉重算或调换。
+你只做"画面语言化"——把事实翻译成文生图/图生视频模型听得懂的画面描述：
+1. shot：按画面描述推断景别（特写/近景/中景/全景/远景）、机位高度（平拍/微俯/微仰）、一句话构图。
+2. characters：给每个入画人物写 frame_position（按 depth_rank：最近者"画面下缘/前景"，最远者"画面上缘地平线/远景深处"，中间者"画面纵深中部"，再叠加 frame_side 的左右）、depth_label（前景/中景/背景）、occlusion（按坐标间距判断谁可能被谁部分遮挡，没有就空串）、spacing（与其他人物的间距语义，如"与小美并排、间隔约一步""独自远离人群半个画面"）、presentation（结合画面描述写这个人物在镜头里的一句话呈现：姿势/在做什么/情绪，服从画面描述，不新增剧情）。
+3. excluded：照抄 hidden 名单与理由。
+4. layout_summary：整幅画面布局一句话（谁前谁后、谁大谁小、谁在哪一侧、画面主体是谁）。
+5. 若提供了运动轨迹（dynamic=true 时），在 presentation 里补一句该人物初始帧之后的运动意向（走位方向、靠近/远离镜头），并在 layout_summary 里补镜头运动（若有）。
+
+只输出一个 JSON 对象，schema：
+{"shot":{"type":"景别","camera_height":"机位高度","composition":"构图一句话"},
+ "characters":[{"name":"...","in_frame":true,"frame_position":"...","depth_label":"前景/中景/背景","size_percent":100,"frame_side":"照抄","facing":"照抄","occlusion":"","spacing":"","presentation":""}],
+ "excluded":[{"name":"...","reason":"照抄"}],
+ "layout_summary":"..."}
+size_percent 与 frame_side、facing 必须与输入事实逐字一致。"""
+
+
+async def synthesize_shot_brief(plot: dict, scene_desc: str, dynamic: bool) -> dict | None:
+    """把调度图坐标+程序几何事实交给 DeepSeek，产出统一的"镜头画面 JSON"。
+    结果按内容哈希缓存（拖拽/移机位/改描述才会重算）；任何失败返回 None（调用方回退程序直译）。"""
+    import hashlib
+    if not isinstance(plot, dict) or not [c for c in (plot.get("characters") or []) if str(c.get("name") or "").strip()]:
+        return None
+    if getattr(deepseek_client, "api_key", "") in ("not-configured", None, ""):
+        return None
+    try:
+        key = hashlib.sha1(json.dumps(
+            {"plot": plot, "desc": (scene_desc or "")[:500], "dyn": bool(dynamic), "v": 1},
+            sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()
+    except Exception:
+        return None
+    if key in _SHOT_BRIEF_CACHE:
+        return _SHOT_BRIEF_CACHE[key]
+
+    facts = compute_camera_facts(plot)
+    compact = {
+        "camera": {"x": round(facts["camera"]["x"], 3), "y": round(facts["camera"]["y"], 3),
+                   "facing": facts["camera"]["facing"], "fov": facts["camera"]["fov"]},
+        "characters": [{"name": str(c.get("name")).strip(),
+                        "x": round(float(c.get("x") or 0), 3), "y": round(float(c.get("y") or 0), 3),
+                        "facing": float(c.get("facing") or 0),
+                        "path": [[round(float(p[0]), 3), round(float(p[1]), 3)] for p in (c.get("path") or [])[:8]
+                                 if isinstance(p, (list, tuple)) and len(p) >= 2]}
+                       for c in plot.get("characters") or []],
+        "props": [{"name": str(p.get("name") or "")[:20],
+                   "x": round(float(p.get("x") or 0), 3), "y": round(float(p.get("y") or 0), 3)}
+                  for p in (plot.get("props") or [])[:12]],
+    }
+    facts_txt = {
+        "visible": [{"name": c["name"], "depth_rank": i + 1, "size_percent": c["size_pct"],
+                     "frame_side": c["side"], "facing": c["facing_desc"], "near_edge": c["near_edge"]}
+                    for i, c in enumerate(facts["visible"])],
+        "hidden": [{"name": c["name"], "reason": c["reason"]} for c in facts["hidden"]],
+    }
+    messages = [
+        {"role": "system", "content": SHOT_TRANSLATE_SYSTEM_PROMPT},
+        {"role": "user", "content":
+            f"【调度图纸坐标数据】\n{json.dumps(compact, ensure_ascii=False)}\n\n"
+            f"【程序几何事实（权威，照抄）】\n{json.dumps(facts_txt, ensure_ascii=False)}\n\n"
+            f"【画面描述】{(scene_desc or '')[:500] or '（无，按坐标推断）'}\n\n"
+            f"【模式】{'生视频（名单只约束0秒初始帧，需补运动意向）' if dynamic else '生单张分镜图（名单＝全部画面）'}\n"
+            "请输出镜头画面 JSON。"},
+    ]
+    try:
+        response = await asyncio.to_thread(
+            deepseek_client.chat.completions.create,
+            model="deepseek-chat", messages=messages, temperature=0.2, max_tokens=1500)
+        data = deepseek_json(response)
+        brief = _validate_shot_brief(data, facts, dynamic)
+        if brief:
+            _SHOT_BRIEF_CACHE[key] = brief
+            log_prompt("AI镜头翻译", json.dumps(brief, ensure_ascii=False)[:600])
+            return brief
+    except Exception as e:
+        print(f"[shot-brief] AI镜头翻译失败，回退程序直译: {type(e).__name__}: {e}")
+    return None
+
+
+def _validate_shot_brief(data: Any, facts: dict, dynamic: bool) -> dict | None:
+    """硬校验 AI 返回的镜头画面 JSON：入画名单必须与程序事实一致，
+    大小百分比/画面左右/朝向以程序为准；多写的人剔除、漏写的人补默认条目。"""
+    if not isinstance(data, dict):
+        return None
+    vis = facts["visible"]
+    vis_names = [c["name"] for c in vis]
+    hidden = facts["hidden"]
+    shot = data.get("shot") if isinstance(data.get("shot"), dict) else {}
+    out_chars, seen = [], set()
+    for item in data.get("characters") or []:
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("name") or "").strip()
+        if not name or name in seen or name not in vis_names:
+            continue  # AI 多写进画面的人：一律剔除（入画名单以程序几何为准）
+        seen.add(name)
+        fc = next(c for c in vis if c["name"] == name)
+        idx = vis_names.index(name)
+        rank = idx + 1
+        n = max(len(vis), 1)
+        depth_label = str(item.get("depth_label") or "").strip()
+        if depth_label not in ("前景", "中景", "背景"):
+            depth_label = "前景" if idx == 0 else ("背景" if idx == n - 1 else "中景")
+        # frame_position：AI 的措辞 + 程序左右纠偏（画面左/右写反时以程序为准）
+        fp = str(item.get("frame_position") or "").strip()
+        prog_side = fc["side"]  # 如 "画面右侧" / "画面中部（几乎正对镜头）"
+        prog_left_right = "画面右" if "画面右" in prog_side else ("画面左" if "画面左" in prog_side else "")
+        if prog_left_right:
+            other = "画面左" if prog_left_right == "画面右" else "画面右"
+            if other in fp and prog_left_right not in fp:
+                fp = fp.replace(other, prog_left_right)
+        if not fp:
+            fp = prog_side
+        out_chars.append({
+            "name": name, "in_frame": True, "frame_position": fp, "depth_label": depth_label,
+            "depth_rank": rank, "size_percent": fc["size_pct"], "frame_side": prog_side,
+            "facing": fc["facing_desc"],
+            "occlusion": str(item.get("occlusion") or "").strip()[:80],
+            "spacing": str(item.get("spacing") or "").strip()[:80],
+            "presentation": str(item.get("presentation") or "").strip()[:150],
+        })
+    # 漏写的人补默认条目（只用程序事实）
+    for idx, fc in enumerate(vis):
+        if fc["name"] in seen:
+            continue
+        n = max(len(vis), 1)
+        out_chars.append({
+            "name": fc["name"], "in_frame": True,
+            "frame_position": fc["side"], "depth_label": "前景" if idx == 0 else ("背景" if idx == n - 1 else "中景"),
+            "depth_rank": idx + 1, "size_percent": fc["size_pct"], "frame_side": fc["side"],
+            "facing": fc["facing_desc"], "occlusion": "", "spacing": "", "presentation": ""})
+    out_excluded, ex_seen = [], set()
+    for item in data.get("excluded") or []:
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("name") or "").strip()
+        if not name or name in ex_seen or name in vis_names:
+            continue
+        reason = str(item.get("reason") or "").strip()
+        match = next((h for h in hidden if h["name"] == name), None)
+        out_excluded.append({"name": name, "reason": (match["reason"] if match else reason) or "不在机位视野内"})
+        ex_seen.add(name)
+    for h in hidden:  # 程序 hidden 名单一个不能少
+        if h["name"] not in ex_seen:
+            out_excluded.append({"name": h["name"], "reason": h["reason"]})
+            ex_seen.add(h["name"])
+    if not out_chars and not out_excluded:
+        return None
+    return {
+        "shot": {"type": str(shot.get("type") or "").strip()[:30],
+                 "camera_height": str(shot.get("camera_height") or "").strip()[:30],
+                 "composition": str(shot.get("composition") or "").strip()[:120]},
+        "characters": out_chars, "excluded": out_excluded,
+        "layout_summary": str(data.get("layout_summary") or "").strip()[:250],
+        "dynamic": bool(dynamic),
+    }
+
+
+def render_shot_brief_text(brief: dict) -> str:
+    """把校验后的镜头画面 JSON 渲染成注入提示词的紧凑文本。"""
+    lines = ["【镜头画面解读（AI 按调度图坐标翻译，几何结论经程序校验，权威）】"]
+    shot = brief.get("shot") or {}
+    head = "；".join(x for x in (shot.get("type"), shot.get("camera_height"), shot.get("composition")) if x)
+    if head:
+        lines.append("镜头：" + head + "。")
+    chars = brief.get("characters") or []
+    if chars:
+        seg = []
+        for c in chars:
+            parts = [c["frame_position"], f"{c['depth_label']}(第{c['depth_rank']}近)"]
+            if c["size_percent"] and c["size_percent"] < 100:
+                parts.append(f"大小约为最近者的{c['size_percent']}%")
+            elif c["size_percent"]:
+                parts.append("画面里最大")
+            parts.append(c["facing"])
+            if c.get("occlusion"):
+                parts.append(f"遮挡：{c['occlusion']}")
+            if c.get("spacing"):
+                parts.append(f"间距：{c['spacing']}")
+            if c.get("presentation"):
+                parts.append(c["presentation"])
+            seg.append(f"{c['name']}（" + "、".join(p for p in parts if p) + "）")
+        lines.append("入画名单（从近到远）：" + "；".join(seg) + "。")
+    excluded = brief.get("excluded") or []
+    if excluded:
+        lines.append("绝不入画：" + "；".join(f"{c['name']}（{c['reason']}）" for c in excluded) + "。")
+    if brief.get("layout_summary"):
+        lines.append("整体布局：" + brief["layout_summary"] + "。")
+    return "\n".join(lines) + "\n"
+
+
+async def build_plot_prompt_text(plot: dict, scene_desc: str, dynamic: bool = False) -> str:
+    """调度图→提示词文本的统一入口：优先 AI 镜头翻译（缓存），失败回退程序直译。"""
+    brief = await synthesize_shot_brief(plot or {}, scene_desc, dynamic)
+    if brief:
+        text = render_shot_brief_text(brief)
+        # 轨迹/走位仍由程序直译补充（AI 只管初始帧画面语言；运动路线公式简单稳定，无需 AI）
+        det = format_plot_to_prompt(plot or {}, dynamic=dynamic)
+        det_moves = ""
+        for ln in det.splitlines():
+            if ln.startswith("【运动路线】") or ln.startswith("【人物站位·初始不在画面名单"):
+                det_moves += ln + "\n"
+        if dynamic and det_moves:
+            text += "【运动路线与初始出画名单（程序按坐标直译，权威）】\n" + det_moves
+        return text
+    return format_plot_to_prompt(plot or {}, dynamic=dynamic)
 
 
 def _load_cn_font(size: int):
@@ -1174,6 +1490,77 @@ def render_diagram_png(plot: dict, kind: str) -> bytes:
     img.save(buf, format="PNG")
     return buf.getvalue()
 
+def _apply_lens_moves(plot: dict, text: str) -> dict:
+    """程序兜底纠偏：口述「XX走向镜头/机位」时，AI 常把"镜头"误解成图纸下方/上方（观众方向）。
+    「镜头」的唯一含义是机位符号所在坐标点——此处按坐标硬纠偏：把被点名角色的轨迹终点
+    吸附到机位附近（起点→机位连线上、距机位 0.08 处，两点一线），朝向改为面向机位。
+    AI 已解析正确（终点已在机位附近）时不覆盖，保留其原有拐点。"""
+    import math
+    if not isinstance(plot, dict) or not text:
+        return plot
+    if not re.search(r"(走向|走近|走到|跑向|冲向|扑向|来到|退到)(了|到)?(镜头|机位|摄影机|摄像机)", text):
+        return plot
+    cam = plot.get("camera") or {}
+    cx, cy = float(cam.get("x", 0.5)), float(cam.get("y", 0.95))
+    names = [str(c.get("name") or "").strip() for c in plot.get("characters") or [] if str(c.get("name") or "").strip()]
+    # 找出口述中点名走向镜头的角色（名字出现在动词短语前），找不到再回退到口述里出现过的角色名
+    subjects = set()
+    for m in re.finditer(r"([\u4e00-\u9fa5A-Za-z0-9·]{1,8}?)(?:走向|走近|走到|跑向|冲向|扑向|来到)(?:了|到)?(?:镜头|机位|摄影机|摄像机)", text):
+        frag = m.group(1)
+        for nm in names:
+            if nm and nm in frag:
+                subjects.add(nm)
+    if not subjects:
+        for nm in names:
+            if nm and nm in text:
+                subjects.add(nm)
+    if not subjects:
+        return plot
+    for c in plot.get("characters") or []:
+        nm = str(c.get("name") or "").strip()
+        if nm not in subjects:
+            continue
+        px, py = float(c.get("x") or 0), float(c.get("y") or 0)
+        dx, dy = cx - px, cy - py
+        d = math.hypot(dx, dy)
+        if d < 0.15:
+            continue  # 起点就在机位旁（可能是视角人物），不动
+        path = [list(p)[:2] for p in (c.get("path") or []) if isinstance(p, (list, tuple)) and len(p) >= 2]
+        end = path[-1] if path else [px, py]
+        end_d = math.hypot(end[0] - cx, end[1] - cy)
+        if end_d <= 0.25:
+            continue  # AI 已把终点放到机位附近，尊重其解析
+        ex = min(max(cx - dx / d * 0.08, 0.0), 1.0)
+        ey = min(max(cy - dy / d * 0.08, 0.0), 1.0)
+        c["path"] = [[round(px, 3), round(py, 3)], [round(ex, 3), round(ey, 3)]]  # 两点一线
+        c["facing"] = round(math.degrees(math.atan2(dx, -dy)) % 360, 1)           # 面向机位
+        stops = c.get("stops")
+        if isinstance(stops, list) and stops:
+            last = stops[-1]
+            if isinstance(last, dict) and not str(last.get("action") or "").strip():
+                last["action"] = "走到镜头前"
+    return plot
+
+
+def _stop_unmentioned(plot: dict, text: str) -> dict:
+    """程序兜底：口述里完全没点名的角色一律停在原位（path/stops 清空），
+    防止 AI 给口述未提及的角色擅自加戏走位（实测：口述只说"小帅走向镜头"，AI 让小美也走了）。
+    口述里一个名单名都没出现时不清理（可能在用昵称，避免误杀被点名角色的轨迹）。"""
+    if not isinstance(plot, dict) or not text:
+        return plot
+    chars = [c for c in (plot.get("characters") or []) if isinstance(c, dict) and str(c.get("name") or "").strip()]
+    mentioned = [c for c in chars if str(c["name"]).strip() in text]
+    if not mentioned:
+        return plot  # 名单名一个都没出现（昵称/代称），保守起见不清轨迹
+    for c in chars:
+        if c in mentioned:
+            continue
+        if any(isinstance(p, (list, tuple)) and len(p) >= 2 for p in (c.get("path") or [])):
+            c["path"] = []
+            c["stops"] = []
+    return plot
+
+
 @app.post("/api/render-diagram")
 async def render_diagram(req: TopViewRequest):
     """调度图纸：DeepSeek 解析口述 → 坐标数据 → PIL 程序化绘制。解析失败用默认布局兜底并提示重试。"""
@@ -1221,6 +1608,8 @@ async def render_diagram(req: TopViewRequest):
         data = deepseek_json(response)
         if isinstance(data.get("characters"), list) and data["characters"]:
             plot = data
+            # 名字对齐：口述里的昵称/错名会被 AI 照抄成名单外新角色，造成图纸与分镜提示词两套人马
+            plot = _align_character_names(plot, req.characters)
     except Exception as e:
         print(f"[render-diagram] DeepSeek 解析失败（{kind}），用默认布局: {type(e).__name__}: {e}")
     if not plot:
@@ -1229,6 +1618,11 @@ async def render_diagram(req: TopViewRequest):
     if base:
         # 程序层强制对齐：即使 AI 没照抄起点，也以 base 坐标为准合并
         plot = _merge_base_plot(plot, base)
+    # 「走向镜头/机位」语义纠偏：镜头＝机位坐标点，不是图纸下方；终点吸附到机位附近（两点一线）
+    lens_txt = (req.feedback or "") + " " + (req.description or "") + " " + (req.video_prompt or "")
+    plot = _apply_lens_moves(plot, lens_txt)
+    # 口述未点名的角色一律停走：AI 常给没提到的人擅自加轨迹（口述只说小帅，小美也被走位）
+    plot = _stop_unmentioned(plot, lens_txt)
     plot = _normalize_plot(plot)
     png = render_diagram_png(plot, kind)
     os.makedirs("static/uploads", exist_ok=True)
@@ -1266,6 +1660,30 @@ async def move_camera(req: MoveCameraRequest):
     cam_summary = _camera_view_summary(plot)
     log_prompt("手动移机位", json.dumps(plot.get("camera"), ensure_ascii=False)[:200])
     log_prompt("机位视野计算(移机位后)", cam_summary)
+    return {"image_url": f"/static/uploads/{fname}", "plot": plot, "cam_summary": cam_summary}
+
+# ---------- 2.63 拖拽编辑：导演在图上直接拖动角色/轨迹拐点/陈设/机位，前端把新坐标发回重绘 ----------
+class RerenderDiagramRequest(BaseModel):
+    plot: dict  # 前端拖拽后改好的坐标数据（0-1 归一化坐标）
+    kind: str = "topview"  # topview=俯视调度图 / trajectory=轨迹调度图
+
+@app.post("/api/rerender-diagram")
+async def rerender_diagram(req: RerenderDiagramRequest):
+    """拖拽编辑的统一重绘入口：前端负责拖挂数学（角色/机位连同轨迹整体平移、
+    拐点单独拖动、陈设移中心点），后端只做规范化钳制与重绘，保证图纸永远合法。
+    角色移动会同步平移其运动轨迹、机位移动会同步平移其移动路径（整条走位跟着人走）。"""
+    kind = "trajectory" if (req.kind or "").lower() == "trajectory" else "topview"
+    plot = _normalize_plot(req.plot or {})
+    png = render_diagram_png(plot, kind)
+    os.makedirs("static/uploads", exist_ok=True)
+    fname = f"diagram_{kind}_{uuid.uuid4().hex[:10]}.png"
+    with open(os.path.join("static", "uploads", fname), "wb") as f:
+        f.write(png)
+    cam_summary = _camera_view_summary(plot)
+    log_prompt(f"拖拽重绘({kind})", json.dumps(
+        {"characters": [(c.get("name"), round(float(c.get("x") or 0), 3), round(float(c.get("y") or 0), 3)) for c in plot.get("characters") or []],
+         "camera": [plot.get("camera", {}).get("x"), plot.get("camera", {}).get("y")]},
+        ensure_ascii=False)[:300])
     return {"image_url": f"/static/uploads/{fname}", "plot": plot, "cam_summary": cam_summary}
 
 # ---------- 2.65 调度纵深解读：把俯视口述换算成"人物近/中/远景层次"说明（供分镜图理解远近关系） ----------
@@ -1660,7 +2078,9 @@ async def generate_image(req: ImageRequest):
             if req.diagram_brief:
                 directive += f"【画面纵深调度解读】（机位视角换算的辅助参考）：{req.diagram_brief.strip()}\n"
             # 坐标翻译：生图模型看不懂俯视图纸上的图标，但听得懂"谁离镜头最近/在哪侧/谁不入画"
-            plot_txt = format_plot_to_prompt(req.plot_data or {})
+            # 顶层镜头翻译：DeepSeek 按坐标+程序几何事实产出"镜头画面 JSON"，失败自动回退程序直译
+            plot_txt = await build_plot_prompt_text(
+                req.plot_data or {}, (req.prompt or "") + " " + (req.context or ""), dynamic=False)
             if plot_txt:
                 directive += "【调度图纸坐标数据（程序按坐标翻译，权威）】\n" + plot_txt + "\n"
             # 导演在重写框里直接指定的画面落位（画面右上角/偏右/居中…）必须压过程序算的默认落位——
@@ -1686,6 +2106,29 @@ async def generate_image(req: ImageRequest):
             payload["prompt"] = payload["prompt"] + "\n\n" + directive
             log_prompt("调度约束注入(尾部)", f"调度图 {n_diag} 张\n" + "\n".join(notes)
                        + f"\nbrief={req.diagram_brief or ''}\nplot_data={'有' if req.plot_data else '无'}\n---\n" + directive, "")
+
+        # 角色外貌锚点：角色卡上最终确定的外貌（导演重写/识图提取后的最新版）是权威基准。
+        # 剧本初稿生成时把当时的外貌整段复制进了各分镜提示词，之后导演改了角色卡，
+        # 旧分镜提示词里的过时外貌（如性别写反、发型不符）会把参考图往回拉——锚点必须压过它。
+        # 前端把每位角色的最新外貌放在 character 参考图元数据的 description 里带来。
+        anchor_lines = []
+        for i in range(len(metas)):
+            m = metas[i] if i < len(metas) else {}
+            if str(m.get("kind") or "") != "character":
+                continue
+            n = str(m.get("name") or "").strip()
+            d = str(m.get("description") or "").strip()
+            if n and d:
+                anchor_lines.append(f"▸{n}：{d}")
+        if anchor_lines:
+            anchor_txt = (
+                "【角色外貌锚点（权威基准）】以下是导演在角色卡上最终确定的各角色外貌（可能已修改过，"
+                "其他来源与此矛盾的旧外貌描述一律作废）：\n" + "\n".join(anchor_lines)
+                + "\n画面中人物的长相、性别、发型发色、体格必须严格照锚点绘制；"
+                "仅当本条分镜提示词中明确写了与锚点不同的服装或造型（剧情需要换装）时，该处按分镜提示词执行，其余外貌特征仍按锚点。\n"
+            )
+            payload["prompt"] = payload["prompt"] + "\n\n" + anchor_txt
+            log_prompt("角色外貌锚点注入", "\n".join(anchor_lines), "")
 
     headers = {
         "Authorization": f"Bearer {DOUBAO_API_KEY}",
@@ -1729,6 +2172,230 @@ class UploadImageRequest(BaseModel):
     filename: str | None = None
 
 # ---------- 3.5 本地图片上传（存到 uploads，返回 URL 供分镜/生视频使用） ----------
+# ---------- 3.55 冲突检测：角色名单 × 调度图纸 × 分镜提示词 矛盾清单 ----------
+class CheckConflictsRequest(BaseModel):
+    characters: List[Dict[str, Any]] = []
+    scenes: List[Dict[str, Any]] = []
+    props: List[Dict[str, Any]] = []
+    storyboards: List[Dict[str, Any]] = []
+
+CONFLICT_CHECK_PROMPT = """你是动画项目的制片审校。给你角色/场景/道具名单与各分镜的文本材料，找出设定互相矛盾的地方。
+【检查维度】性别、年龄、体型、发型发色、瞳色、服装、身份/职业、称谓关系、各分镜出场人物与名单是否一致。
+【优先级规则】标注「用户已修改」的内容代表导演的明确意志，优先级最高：矛盾时以它为基准，报告另一份（AI 生成的）需要修改。用户手动上传的参考图同理优先。
+【注意】
+- 同一角色的「设定描述」与「生图提示词」若不一致，按修改标记判断以哪份为准。
+- 只报告真实矛盾，不要把画风差异、无关细节凑数。
+- 每条给出具体位置与可直接执行的修改建议（改哪一份、怎么改）。
+【输出】严格只输出 JSON，不要 markdown：{"conflicts":[{"where":"位置(如:分镜3 / 角色:憨憨)","type":"矛盾类型(如:性别冲突)","detail":"矛盾内容，引用双方原文关键句","suggestion":"具体修改建议","severity":"error或warn"}]}
+没有矛盾输出 {"conflicts":[]}"""
+
+def _program_conflicts(req: CheckConflictsRequest) -> list:
+    """确定性检查：不需要 AI，零成本先跑一轮。"""
+    out, cast = [], []
+    for c in (req.characters or []):
+        n = str((c or {}).get("name") or "").strip()
+        if n:
+            cast.append(n)
+    dup = sorted({n for n in cast if cast.count(n) > 1})
+    if dup:
+        out.append({"severity": "error", "where": "角色列表", "type": "同名角色",
+                    "detail": f"存在同名角色：{'、'.join(dup)}",
+                    "suggestion": "重命名或删除重复角色，否则调度图纸与生图会互相混淆"})
+    cast_set = set(cast)
+    has_img = {}
+    for c in (req.characters or []):
+        n = str((c or {}).get("name") or "").strip()
+        if n:
+            has_img[n] = bool((c or {}).get("imgSrc") or (c or {}).get("has_img"))
+    missing_img_reported = set()
+    for i, sb in enumerate(req.storyboards or [], 1):
+        label = f"分镜{i}"
+        for kind, key in (("俯视调度图", "topViewPlot"), ("轨迹调度图", "trajViewPlot")):
+            plot = sb.get(key)
+            if not isinstance(plot, dict):
+                continue
+            for c in plot.get("characters") or []:
+                n = str((c or {}).get("name") or "").strip()
+                if n and cast_set and n not in cast_set:
+                    out.append({"severity": "error", "where": f"{label}·{kind}", "type": "名单外角色",
+                                "detail": f"图纸上出现角色名单里没有的「{n}」",
+                                "suggestion": "点该图的「🔄 重生调度图」重新解析口述，或把口述里的称呼改成角色名单里的名字"})
+        prompt_txt = " ".join(str(sb.get(k) or "") for k in ("description", "edited_prompt", "image_prompt", "video_prompt"))
+        for n in sorted(cast_set):
+            if n in prompt_txt and not has_img.get(n, False) and n not in missing_img_reported:
+                missing_img_reported.add(n)
+                out.append({"severity": "warn", "where": f"{label} 等", "type": "缺参考图",
+                            "detail": f"提示词提到角色「{n}」，但该角色还没有参考图",
+                            "suggestion": f"先到「角色参考图」为 {n} 生成或上传参考图，再生成相关分镜图/视频，否则人物长相每张图都会变"})
+    return out
+
+@app.post("/api/check-conflicts")
+async def check_conflicts(req: CheckConflictsRequest):
+    """冲突检测：程序确定性检查 + DeepSeek 语义矛盾检查，返回清单供导演逐条手动修改。"""
+    conflicts = _program_conflicts(req)
+
+    # ---- DeepSeek 语义检查（性别/外貌/身份等程序判不了的矛盾）----
+    lines = ["【角色名单】"]
+    for c in (req.characters or [])[:20]:
+        n = str((c or {}).get("name") or "").strip()
+        if not n:
+            continue
+        edited = bool(str((c or {}).get("edited_prompt") or "").strip())
+        desc = str((c or {}).get("description") or "")[:120]
+        prompt = str((c or {}).get("edited_prompt") or (c or {}).get("image_prompt") or "")[:180]
+        lines.append(f"- {n}｜用户{'已修改(优先)' if edited else '未修改'}｜设定：{desc}｜生图提示词：{prompt}")
+    if req.scenes or req.props:
+        lines.append("【场景/道具】")
+        for s in (req.scenes or [])[:12]:
+            if str((s or {}).get("name") or "").strip():
+                lines.append(f"- 场景 {s.get('name')}：{str((s or {}).get('description') or '')[:80]}")
+        for p in (req.props or [])[:12]:
+            if str((p or {}).get("name") or "").strip():
+                lines.append(f"- 道具 {p.get('name')}：{str((p or {}).get('description') or '')[:80]}")
+    lines.append("【分镜材料】")
+    for i, sb in enumerate((req.storyboards or [])[:40], 1):
+        parts = [f"分镜{i}"]
+        if str(sb.get("description") or "").strip():
+            parts.append(f"画面描述：{str(sb.get('description'))[:150]}")
+        if str(sb.get("dialogue") or "").strip():
+            parts.append(f"台词：{str(sb.get('dialogue'))[:80]}")
+        prompt = str(sb.get("edited_prompt") or sb.get("image_prompt") or "")
+        mark = "用户已修改(优先)" if str(sb.get("edited_prompt") or "").strip() else "未修改"
+        if prompt.strip():
+            parts.append(f"生图提示词({mark})：{prompt[:280]}")
+        if str(sb.get("video_prompt") or "").strip():
+            parts.append(f"视频提示词：{str(sb.get('video_prompt'))[:180]}")
+        if str(sb.get("topViewDesc") or "").strip():
+            parts.append(f"俯视口述：{str(sb.get('topViewDesc'))[:120]}")
+        if str(sb.get("trajViewDesc") or "").strip():
+            parts.append(f"轨迹口述：{str(sb.get('trajViewDesc'))[:120]}")
+        if len(parts) > 1:
+            lines.append("- " + "｜".join(parts))
+
+    ai_note = ""
+    if getattr(deepseek_client, "api_key", "") in ("not-configured", None, ""):
+        ai_note = "未配置 DeepSeek Key，仅完成程序检查（名单外角色/同名/缺参考图）。"
+    else:
+        try:
+            response = deepseek_client.chat.completions.create(
+                model="deepseek-chat",
+                messages=[
+                    {"role": "system", "content": CONFLICT_CHECK_PROMPT},
+                    {"role": "user", "content": "\n".join(lines)},
+                ],
+                response_format={"type": "json_object"},
+                max_tokens=1500,
+                temperature=0.1,
+            )
+            data = deepseek_json(response)
+            for c in (data.get("conflicts") or [])[:20]:
+                if isinstance(c, dict) and str(c.get("detail") or "").strip():
+                    conflicts.append({
+                        "severity": str(c.get("severity") or "warn"),
+                        "where": str(c.get("where") or "")[:40],
+                        "type": str(c.get("type") or "矛盾")[:20],
+                        "detail": str(c.get("detail") or "")[:300],
+                        "suggestion": str(c.get("suggestion") or "")[:300],
+                    })
+        except Exception as e:
+            ai_note = f"AI 语义检查失败（{type(e).__name__}），仅完成程序检查。"
+            print(f"[check-conflicts] DeepSeek 失败: {e}")
+    return {"conflicts": conflicts, "note": ai_note}
+
+
+# ---------- 参考图识图提取文字描述 ----------
+# 场景：角色/场景/道具上传参考图后可能没有文字描述（如 AI 自动生成故事时漏写的角色，
+# 或用户只想传图），而下游的分镜提示词拼装、冲突检测都依赖文字描述——用 DeepSeek
+# 视觉能力（V4.1 起支持 image 输入）从参考图反推描述与生图提示词。
+_REF_VISION_PROMPTS = {
+    "character": (
+        "你是动画项目的角色设定师。仔细观察这张角色参考图，只描述画面中真实可见的信息。",
+        "description：角色外貌中文描述，一句话到两句话，必须涵盖：性别与年龄段、发型发色、五官特征、服装样式与颜色、体格气质。不要编造图中没有的特征，不要写性格剧情。",
+        "image_prompt：用于 AI 生图的角色设定图提示词，以人物外貌关键词为主（性别/发型/服装/体格/配色），风格中性，不含背景剧情。",
+    ),
+    "scene": (
+        "你是动画项目的场景美术师。仔细观察这张场景参考图，只描述画面中真实可见的信息。",
+        "description：场景中文描述，一句话到两句话，涵盖：地点类型、时间光线氛围、主要景物构成、色调。不要编造图中没有的内容。",
+        "image_prompt：用于 AI 生图的场景空镜提示词，以场景构成关键词为主（地点/光线/色调/主要物件），不含人物与剧情。",
+    ),
+    "prop": (
+        "你是动画项目的道具设定师。仔细观察这张道具参考图，只描述画面中真实可见的信息。",
+        "description：道具中文描述，一句话，涵盖：物品类型、材质颜色、外观细节特征。不要编造图中没有的内容。",
+        "image_prompt：用于 AI 生图的道具设定图提示词，以物品外观关键词为主（类型/材质/颜色/细节）。",
+    ),
+}
+
+
+class AnalyzeRefImageRequest(BaseModel):
+    image_base64: str | None = None
+    image_url: str | None = None     # 本地 /static/... 路径或远程 http(s) URL（与 base64 二选一）
+    kind: str = "character"          # character / scene / prop
+    name: str | None = None          # 角色/场景/道具名（供提示词参考，可空）
+
+
+@app.post("/api/analyze-ref-image")
+async def analyze_ref_image(req: AnalyzeRefImageRequest):
+    """识图提取：从上传的参考图反推文字描述与生图提示词。"""
+    if getattr(deepseek_client, "api_key", "") in ("not-configured", None, ""):
+        raise HTTPException(400, "未配置 DeepSeek API Key，无法识图。请到 ⚙️ API 设置填写。")
+    b64 = (req.image_base64 or "").strip()
+    if b64.startswith("data:"):
+        b64 = b64.split(",", 1)[1] if "," in b64 else b64
+    if not b64 and (req.image_url or "").strip():
+        u = req.image_url.strip()
+        try:
+            if u.startswith("http://") or u.startswith("https://"):
+                async with httpx.AsyncClient(timeout=30, follow_redirects=True) as hc:
+                    r = await hc.get(u)
+                    r.raise_for_status()
+                img_bytes = r.content
+            else:
+                # 本地 /static/... 路径：限制在 static 目录内，防目录穿越
+                rel = u.lstrip("/").removeprefix("static/")
+                p = Path("static") / rel
+                if not p.resolve().is_relative_to(Path("static").resolve()):
+                    raise HTTPException(400, "非法的图片路径")
+                if not p.exists():
+                    raise HTTPException(404, f"图片不存在：{u}")
+                img_bytes = p.read_bytes()
+            b64 = base64.b64encode(img_bytes).decode()
+        except HTTPException:
+            raise
+        except Exception as e:
+            print(f"[analyze-ref-image] 取图失败: {e}")
+            raise HTTPException(400, f"无法读取参考图（{type(e).__name__}），请重新上传或生成")
+    if not b64:
+        raise HTTPException(400, "缺少图片内容（image_base64 或 image_url 二选一）")
+    kind = req.kind if req.kind in _REF_VISION_PROMPTS else "character"
+    p_intro, p_desc, p_prompt = _REF_VISION_PROMPTS[kind]
+    type_label = {"character": "角色", "scene": "场景", "prop": "道具"}[kind]
+    name_line = (f"该{type_label}的名字是「{(req.name or '').strip()}」，仅作参考，不要把名字本身写进描述。"
+                 if (req.name or "").strip() else "")
+    try:
+        response = deepseek_client.chat.completions.create(
+            model="deepseek-chat",
+            messages=[{"role": "user", "content": [
+                {"type": "text", "text": (
+                    f"{p_intro}\n{name_line}\n用 JSON 返回两个字段：\n{p_desc}\n{p_prompt}"
+                )},
+                {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}},
+            ]}],
+            response_format={"type": "json_object"},
+            max_tokens=500,
+            temperature=0.2,
+        )
+        data = deepseek_json(response)
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"[analyze-ref-image] 识图失败: {e}")
+        raise HTTPException(502, f"识图失败：{type(e).__name__}，请稍后重试")
+    description = str(data.get("description") or "").strip()
+    image_prompt = str(data.get("image_prompt") or "").strip()
+    if not description:
+        raise HTTPException(502, "识图未返回有效描述，请换一张更清晰的参考图重试")
+    return {"description": description[:500], "image_prompt": image_prompt[:600]}
+
 @app.post("/api/upload-image")
 async def upload_image(req: UploadImageRequest):
     b64 = req.image_base64.strip()
@@ -1818,6 +2485,26 @@ def local_url_to_data_uri(url: str) -> str:
 # 档位列表必须跨请求缓存（此前缓存放函数内每次清空，查询一失败就丢档位 → 横屏变默认竖屏）
 _WORKFLOW_RES_CACHE: dict = {}
 
+def measure_local_image_aspect(url: str | None) -> float | None:
+    """后端兜底：从本地图床 URL 实测图片宽高比。
+    前端是靠 new Image() 在浏览器里探测宽高比的，一旦探测失败（加载卡死/旧版前端没传），
+    image_aspect 就是 null，后端会回落到工作流默认竖屏档 —— 横屏项目就出了竖屏视频。
+    本项目的分镜图/参考图全部落在 static/uploads，后端直接用 Pillow 读文件实测，
+    与前端是否传值无关，彻底消除这条断链。"""
+    try:
+        if not url or "/static/" not in url:
+            return None
+        path_part = url.split("/static/")[-1].split("?")[0]
+        local_path = os.path.join("static", path_part)
+        if not os.path.exists(local_path):
+            return None
+        from PIL import Image as PILImage
+        with PILImage.open(local_path) as im:
+            w, h = im.size
+        return (w / h) if h and w else None
+    except Exception:
+        return None
+
 @app.post("/api/generate-video")
 async def generate_video(req: VideoRequest):
     # 帧模式归一化（先算好，才能决定用哪支令牌）
@@ -1839,7 +2526,8 @@ async def generate_video(req: VideoRequest):
         prompt += f"\n【时长校正】本视频实际总时长为 {req.duration} 秒：若上方动作时序写明的总时长与此不符，按 {req.duration} 秒重新匀排各动作节点，禁止提前结束或超时。"
     if req.plot_data:
         # dynamic=True：名单只约束初始帧，后续人物进出场按走位与镜头运动推演（视频有时间轴，与单帧分镜图不同）
-        plot_txt = format_plot_to_prompt(req.plot_data, dynamic=True)
+        # 顶层镜头翻译：DeepSeek 按坐标+程序几何事实产出"镜头画面 JSON"（含运动意向），失败自动回退程序直译
+        plot_txt = await build_plot_prompt_text(req.plot_data, req.prompt, dynamic=True)
         if plot_txt:
             prompt = (f"{prompt}\n\n【运动轨迹指令】（由导演定稿的调度图纸坐标翻译而来，"
                       f"人物走位、运动快慢、身体朝向与镜头运动必须严格遵守）\n{plot_txt}\n"
@@ -1893,7 +2581,12 @@ async def generate_video(req: VideoRequest):
             for o in options:  # 方向命中但档位不全时，取该方向任意档
                 if want in o:
                     return o
-        # 拿不到宽高比时回退 768p竖（与工作流默认一致，避免误选 480p 降画质）
+        # 兜底（拿不到宽高比，如远程 URL 无法实测）：显式选"768p竖"，与工作流默认档一致。
+        # 旧写法是"取第一个含 768p 的档"，但 zm 系枚举顺序里第一个是 768p横——碰运气，
+        # 换支工作流（lightx2v 枚举里 768p竖 在前）就变竖屏，行为不可预测
+        for o in options:
+            if "768p竖" in o:
+                return o
         for o in options:
             if "768p" in o:
                 return o
@@ -1933,9 +2626,19 @@ async def generate_video(req: VideoRequest):
 
         target_workflow = req.workflow_id if req.workflow_id else AUTODL_WORKFLOW
         res_options = await get_resolution_options(client, headers)
-        chosen_res = pick_resolution(res_options, req.image_aspect)
+        # 宽高比三级来源：前端浏览器探测 → 前端比例选择器兜底 → 后端 Pillow 本地实测。
+        # 任一环成功即可正确选横/竖档，不再出现"探测失败就回落竖屏默认档"
+        image_aspect = req.image_aspect
+        if not image_aspect:
+            for u in list(req.image_urls[:3]) + [req.first_frame_url, req.last_frame_url]:
+                a = measure_local_image_aspect(u)
+                if a:
+                    image_aspect = a
+                    print(f"📏 前端未传有效宽高比，后端本地实测参考图: {u} → {a:.3f}")
+                    break
+        chosen_res = pick_resolution(res_options, image_aspect)
         if chosen_res:
-            print(f"🖼️ 参考图宽高比={req.image_aspect} → 自动选择 resolution 档位: {chosen_res}")
+            print(f"🖼️ 参考图宽高比={image_aspect} → 自动选择 resolution 档位: {chosen_res}")
 
         async def submit(pl: dict):
             # 网络瞬断容错：自动重试 2 次，仍失败才报错（避免偶发 httpx.ReadError 直接 500）

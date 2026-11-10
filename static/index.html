@@ -35,7 +35,9 @@
         .section h2 { font-size: 16px; margin-bottom: 16px; font-weight: 600; display: flex; align-items: center; gap: 8px;}
         
         textarea { width: 100%; background: #f9fafb; border: 1px solid var(--border-color); border-radius: 8px; padding: 12px; font-size: 14px; resize: vertical; font-family: inherit; }
-        .prompt-edit-area { width: 100%; min-height: 80px; max-height: 400px; font-size: 13px; color: #4b5563; margin-top: 10px; padding: 10px; border: 1px solid var(--border-color); border-radius: 8px; line-height: 1.6; resize: none; overflow: hidden; box-sizing: border-box; }
+        .prompt-edit-area { width: 100%; min-height: 200px; max-height: 800px; font-size: 13px; color: #4b5563; margin-top: 10px; padding: 10px; border: 1px solid var(--border-color); border-radius: 8px; line-height: 1.6; resize: vertical; overflow-y: auto; box-sizing: border-box; }
+        /* 参考图缩小 1/3 让出空间（只作用于角色/场景/道具卡的直接图片，分镜画廊不受影响） */
+        .image-slot > img { width: 66%; height: auto; border-radius: 10px; display: block; }
         
         /* ---------- 统一按钮体系：同高同盒模型、层级分明 ---------- */
         button, a.btn-download { display: inline-flex; align-items: center; justify-content: center; gap: 4px; height: 32px; padding: 0 14px; background: var(--primary); color: #fff; border: none; border-radius: 8px; font-family: inherit; font-size: 13px; font-weight: 600; line-height: 1; cursor: pointer; white-space: nowrap; text-decoration: none; transition: filter .15s, background .15s, transform .06s; }
@@ -102,6 +104,8 @@
         /* 设置为覆盖主区域的固定面板（侧栏标签仍可见可点） */
         #settingsModal { position: fixed; top: 0; left: 260px; right: 0; bottom: 0; background: var(--bg-main); z-index: 400; overflow-y: auto; padding: 24px; display: none; }
         #settingsModal:not(.hidden) { display: block; }
+        #conflictModal { position: fixed; top: 0; left: 260px; right: 0; bottom: 0; background: var(--bg-main); z-index: 400; overflow-y: auto; padding: 24px; display: none; }
+        #conflictModal:not(.hidden) { display: block; }
         .style-chips { display: flex; gap: 8px; flex-wrap: wrap; margin: 14px 0 18px; }
         .style-chip { height: 30px; padding: 0 14px; border-radius: 9999px; background: #fff; color: #374151; border: 1px solid var(--border-color); font-size: 13px; }
         .style-chip:hover { background: #f3f4f6; filter: none; }
@@ -141,6 +145,7 @@
         <div class="topbar" id="topbar">
             <input type="text" id="projectNameInput" placeholder="未命名项目" onchange="saveCurrentProject()">
             <div style="display:flex; gap:10px;">
+                <button class="btn-save" onclick="checkConflicts()" id="conflictBtn" title="扫描角色名单、调度图纸与各分镜提示词之间的矛盾（性别/外貌/名单外角色/缺参考图等），列出清单供你手动修改。你手动修改过的内容优先级最高">🔍 冲突检测</button>
                 <button class="btn-save" onclick="saveCurrentProject(true)">💾 保存当前进度</button>
                 <button class="btn-save" onclick="exportProject()" title="把当前项目的剧本、对话、提示词和引用的图片/视频打包成一个 .aianime.zip 文件，可拷到别的电脑导入">📤 导出</button>
                 <button class="btn-save" onclick="document.getElementById('importProjectInput').click()" title="导入一个 .aianime.zip 项目包，作为新项目加入列表">📥 导入</button>
@@ -206,6 +211,7 @@
                     <input type="file" id="mainImageInput" accept="image/*" onchange="handleMainImageSelect(event)" style="display:none;">
                     <input type="file" id="sbImageUploadInput" accept="image/*" onchange="handleSbImageUpload(event)" style="display:none;">
                     <input type="file" id="diagramUploadInput" accept="image/*" onchange="handleDiagramUpload(event)" style="display:none;">
+                    <input type="file" id="refImageUploadInput" accept="image/*" onchange="handleRefImageUpload(event)" style="display:none;">
                     <label for="mainImageInput" class="label-upload">📎 传图</label>
                 </div>
                 <span id="storyStatus" class="hint"></span>
@@ -222,8 +228,8 @@
                 <div id="chatContainer" class="chat-container"></div>
                 <div id="chatImagePreviewArea" class="input-attachment hidden"></div>
                 <div class="chat-input-row">
-                    <input type="file" id="chatImageInput" accept="image/*,.txt,.md,.csv,.pdf,.docx,.doc" onchange="handleChatAttachmentSelect(event)" style="display:none;">
-                    <label for="chatImageInput" class="label-upload" style="height: 44px; padding: 0 16px;" title="上传图片 / txt / Word(docx) / PDF 附件">📎</label>
+                    <input type="file" id="chatImageInput" accept="image/*,.txt,.md,.csv,.pdf,.docx,.doc" multiple onchange="handleChatAttachmentSelect(event)" style="display:none;">
+                    <label for="chatImageInput" class="label-upload" style="height: 44px; padding: 0 16px;" title="上传图片（可一次多选）/ txt / Word(docx) / PDF 附件">📎</label>
                     <textarea id="chatInput" placeholder="输入回答..." oninput="autoResizeTextarea(this)" onkeydown="handleChatKeyDown(event)"></textarea>
                     <button onclick="sendChatMessage()" id="chatSendBtn">发送</button>
                 </div>
@@ -323,6 +329,18 @@
         </div>
     </div>
 
+    <!-- 冲突检测结果面板 -->
+    <div id="conflictModal" class="hidden">
+        <div class="side-view-inner" style="max-width:760px;">
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+                <h2 style="margin:0;">🔍 冲突检测</h2>
+                <button class="btn-sm btn-ghost" onclick="document.getElementById('conflictModal').classList.add('hidden')">✕ 关闭</button>
+            </div>
+            <div class="hint" style="margin:10px 0 14px;">列出角色设定、调度图纸、分镜提示词之间的矛盾。<b>你手动修改过的内容优先级最高</b>——按清单把 AI 生成的部分改成与你修改的一致即可，每条改完可重新点检测复查。</div>
+            <div id="conflictList"></div>
+        </div>
+    </div>
+
     <!-- 设置标签页（覆盖主区域，侧栏标签仍可点击切换） -->
     <div id="settingsModal" class="hidden">
         <div class="side-view-inner" style="max-width:720px;">
@@ -371,7 +389,7 @@
         let currentProjectId = null;
         let currentData = { id: null, name: "未命名项目", workflowId: "minimax_h3_zm_u24", idea: "", chatHistory: [], storyData: null, images: {} };
         let mainImageBase64 = null;
-        let chatImageBase64 = null;
+        let chatImagesBase64 = [];   // 聊天图片：base64 数组，支持一次多张
 
         function autoResizeTextarea(t) { t.style.height = 'auto'; t.style.height = Math.min(t.scrollHeight, 120) + 'px'; }
         function handleChatKeyDown(e) { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendChatMessage(); e.target.style.height = 'auto'; } }
@@ -616,46 +634,57 @@
         }
         function clearMainImage() { mainImageBase64 = null; document.getElementById("mainImageInput").value = ""; document.getElementById("mainImagePreviewArea").classList.add("hidden"); }
 
+        function handleChatImageFiles(files) {
+            // 一次读入多张图片，全部就绪后统一刷新预览
+            if (!files || !files.length) return;
+            let pending = files.length;
+            files.forEach(file => {
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    chatImagesBase64.push(e.target.result.split(',')[1]);
+                    if (--pending === 0) renderChatAttachments();
+                }; reader.readAsDataURL(file);
+            });
+        }
         function handleChatImageSelect(event) {
-            const file = event.target.files[0]; if (!file) return;
-            const reader = new FileReader();
-            reader.onload = function(e) {
-                chatImageBase64 = e.target.result.split(',')[1];
-                renderChatAttachments();
-            }; reader.readAsDataURL(file);
+            handleChatImageFiles(Array.from(event.target.files || []).filter(f => f.type.startsWith("image/")));
         }
 
         // ===== 聊天附件：图片 + 文档（txt/md/csv/pdf/docx，后端解析为文本注入上下文） =====
         let chatAttachments = []; // [{name, text}]
         function handleChatAttachmentSelect(event) {
-            const file = event.target.files[0]; if (!file) return;
-            if (file.type.startsWith("image/")) {
-                handleChatImageSelect(event);
-                return;
-            }
-            // 文档类：交给后端解析成文本
-            const area = document.getElementById("chatImagePreviewArea");
-            area.classList.remove("hidden");
-            const pending = document.createElement("div");
-            pending.className = "hint"; pending.id = "attach-pending";
-            pending.textContent = `⏳ 正在解析 ${file.name}…`;
-            area.appendChild(pending);
-            const fd = new FormData();
-            fd.append("file", file);
-            fetch(`${API}/api/extract-file`, { method: "POST", body: fd })
-                .then(r => r.json().then(j => ({ ok: r.ok, j })))
-                .then(({ ok, j }) => {
-                    pending.remove();
-                    if (!ok) throw new Error(j.detail || "解析失败");
-                    chatAttachments.push({ name: j.name, text: j.text });
-                    renderChatAttachments();
-                })
-                .catch(e => { pending.remove(); alert("附件解析失败：" + e.message); });
+            const files = Array.from(event.target.files || []);
+            if (!files.length) { event.target.value = ""; return; }
+            // 图片与文档混选：图片走本地预览，文档逐个交给后端解析成文本
+            const images = files.filter(f => f.type.startsWith("image/"));
+            const docs = files.filter(f => !f.type.startsWith("image/"));
+            if (images.length) handleChatImageFiles(images);
+            docs.forEach(file => {
+                const area = document.getElementById("chatImagePreviewArea");
+                area.classList.remove("hidden");
+                const pending = document.createElement("div");
+                pending.className = "hint"; pending.id = "attach-pending";
+                pending.textContent = `⏳ 正在解析 ${file.name}…`;
+                area.appendChild(pending);
+                const fd = new FormData();
+                fd.append("file", file);
+                fetch(`${API}/api/extract-file`, { method: "POST", body: fd })
+                    .then(r => r.json().then(j => ({ ok: r.ok, j })))
+                    .then(({ ok, j }) => {
+                        pending.remove();
+                        if (!ok) throw new Error(j.detail || "解析失败");
+                        chatAttachments.push({ name: j.name, text: j.text });
+                        renderChatAttachments();
+                    })
+                    .catch(e => { pending.remove(); alert("附件解析失败：" + e.message); });
+            });
             event.target.value = "";
         }
         function renderChatAttachments() {
             const area = document.getElementById("chatImagePreviewArea");
-            const imgHtml = chatImageBase64 ? `<img src="data:image/jpeg;base64,${chatImageBase64}" height="60" style="border-radius:6px;"> <button class="btn-sm btn-ghost" onclick="clearChatImage()">取消</button>` : "";
+            const imgHtml = chatImagesBase64.map((b64, i) =>
+                `<span style="display:inline-flex; align-items:center; gap:4px;"><img src="data:image/jpeg;base64,${b64}" height="60" style="border-radius:6px;"> <button class="btn-sm btn-ghost" onclick="removeChatImage(${i})" title="移除这张图">✕</button></span>`
+            ).join(" ");
             const docHtml = chatAttachments.map((a, i) =>
                 `<span style="background:#eef2ff; border:1px solid #c7d2fe; color:#3730a3; padding:6px 10px; border-radius:8px; font-size:12px; display:inline-flex; align-items:center; gap:6px;">📄 ${a.name}（${a.text.length}字） <button class="btn-sm btn-ghost" onclick="removeChatAttachment(${i})" title="移除附件">✕</button></span>`
             ).join("");
@@ -663,9 +692,10 @@
             area.classList.toggle("hidden", !(imgHtml + docHtml).trim());
         }
         function removeChatAttachment(i) { chatAttachments.splice(i, 1); renderChatAttachments(); }
+        function removeChatImage(i) { chatImagesBase64.splice(i, 1); renderChatAttachments(); }
         function clearChatAttachments() { chatAttachments = []; renderChatAttachments(); }
         function clearChatImage() {
-            chatImageBase64 = null;
+            chatImagesBase64 = [];
             const input = document.getElementById("chatImageInput"); if (input) input.value = "";
             const area = document.getElementById("chatImagePreviewArea");
             if (area) { area.classList.add("hidden"); area.innerHTML = ""; }
@@ -680,9 +710,8 @@
                     reader.onload = function(event) {
                         const base64Str = event.target.result;
                         if (!document.getElementById("brainstormSection").classList.contains("hidden")) {
-                            chatImageBase64 = base64Str.split(',')[1];
-                            document.getElementById("chatImagePreviewArea").innerHTML = `<img src="${base64Str}" height="60" style="border-radius:6px;"> <button class="btn-sm btn-ghost" onclick="clearChatImage()">取消</button>`;
-                            document.getElementById("chatImagePreviewArea").classList.remove("hidden");
+                            chatImagesBase64.push(base64Str.split(',')[1]);
+                            renderChatAttachments();
                         } else {
                             mainImageBase64 = base64Str.split(',')[1];
                             document.getElementById("mainPreviewImg").src = base64Str;
@@ -783,21 +812,85 @@
             container.appendChild(wrapper); container.scrollTop = container.scrollHeight;
         }
 
+        // ================= 冲突检测：角色名单 × 调度图纸 × 分镜提示词 =================
+        function _escConf(s) {
+            return String(s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+        }
+        async function checkConflicts() {
+            const sd = currentData.storyData;
+            if (!sd) return alert("请先生成或导入剧本");
+            const btn = document.getElementById("conflictBtn");
+            btn.disabled = true; const oldText = btn.textContent; btn.textContent = "🔍 检测中…";
+            const trim = (s, n) => String(s || "").slice(0, n);
+            const payload = {
+                characters: (sd.characters || []).map(c => ({
+                    name: trim(c.name, 30), description: trim(c.description, 150),
+                    image_prompt: trim(c.image_prompt, 200), edited_prompt: trim(c.edited_prompt, 200),
+                    imgSrc: c.imgSrc ? "1" : "",
+                })),
+                scenes: (sd.scenes || []).map(s => ({ name: trim(s.name, 30), description: trim(s.description, 100) })),
+                props: (sd.props || []).map(p => ({ name: trim(p.name, 30), description: trim(p.description, 100) })),
+                storyboards: (sd.storyboards || []).map(sb => ({
+                    description: trim(sb.description, 150), dialogue: trim(sb.dialogue, 80),
+                    image_prompt: trim(sb.image_prompt, 300), edited_prompt: trim(sb.edited_prompt, 300),
+                    video_prompt: trim(sb.video_prompt, 200),
+                    topViewDesc: trim(sb.topViewDesc, 120), trajViewDesc: trim(sb.trajViewDesc, 120),
+                    topViewPlot: sb.topViewPlot || null, trajViewPlot: sb.trajViewPlot || null,
+                })),
+            };
+            try {
+                const resp = await fetch(`${API}/api/check-conflicts`, {
+                    method: "POST", headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(payload),
+                });
+                if (!resp.ok) {
+                    const err = await resp.json().catch(() => ({}));
+                    throw new Error(err.detail || `HTTP ${resp.status}`);
+                }
+                const data = await resp.json();
+                renderConflicts(data);
+                document.getElementById("conflictModal").classList.remove("hidden");
+            } catch (e) {
+                alert("冲突检测失败：" + e.message);
+            } finally {
+                btn.disabled = false; btn.textContent = oldText;
+            }
+        }
+        function renderConflicts(data) {
+            const listEl = document.getElementById("conflictList");
+            const items = data.conflicts || [];
+            let html = "";
+            if (data.note) html += `<div class="hint" style="margin-bottom:10px;">ℹ️ ${_escConf(data.note)}</div>`;
+            if (!items.length) {
+                html += "<div style='color:#16a34a; padding:24px 0; font-size:15px; font-weight:600;'>✅ 未发现矛盾——角色名单、调度图纸与各分镜提示词互相一致。</div>";
+            } else {
+                html += `<div class="hint" style="margin-bottom:10px;">共 ${items.length} 条，按严重程度排序：</div>` + items.map(c => {
+                    const isErr = c.severity === "error";
+                    return `<div style="border:1px solid ${isErr ? "#fecaca" : "#fde68a"}; background:${isErr ? "#fef2f2" : "#fffbeb"}; border-radius:8px; padding:12px 14px; margin-bottom:10px; font-size:13px; line-height:1.7;">
+                        <div style="font-weight:600;">${isErr ? "⛔" : "⚠️"} ${_escConf(c.where)} · ${_escConf(c.type)}</div>
+                        <div style="margin-top:4px;">${_escConf(c.detail)}</div>
+                        ${c.suggestion ? `<div style="margin-top:4px; color:#1d4ed8;">✏️ ${_escConf(c.suggestion)}</div>` : ""}
+                    </div>`;
+                }).join("");
+            }
+            listEl.innerHTML = html;
+        }
+
         async function sendChatMessage(userInput = null, isInit = false) {
             const inputField = document.getElementById("chatInput");
             const sendBtn = document.getElementById("chatSendBtn");
             const text = isInit ? "" : (userInput || inputField.value.trim());
             const attachBlock = chatAttachments.map(a => `\n\n📎【附件·${a.name}】\n${a.text}`).join("");
             const fullText = ((text || "") + attachBlock).trim();
-            if (!isInit && !text && !chatImageBase64 && !chatAttachments.length) return;
+            if (!isInit && !text && !chatImagesBase64.length && !chatAttachments.length) return;
 
-            const imgToSend = chatImageBase64;
+            const imgsToSend = chatImagesBase64.slice();
             if (!isInit) {
                 const chipParts = [];
-                if (imgToSend) chipParts.push("🖼️ 附带图片");
+                if (imgsToSend.length) chipParts.push(imgsToSend.length > 1 ? `🖼️ 图片 ×${imgsToSend.length}` : "🖼️ 附带图片");
                 if (chatAttachments.length) chipParts.push(`📄 附件 ×${chatAttachments.length}`);
                 appendChatBubble('user', text, null, true, chipParts.join("　"));
-                currentData.chatHistory.push({"role": "user", "content": fullText || (imgToSend ? "[图片]" : "")});
+                currentData.chatHistory.push({"role": "user", "content": fullText || (imgsToSend.length ? "[图片]" : "")});
                 inputField.value = ""; inputField.style.height = 'auto'; clearChatImage(); clearChatAttachments();
             }
             inputField.disabled = true; sendBtn.disabled = true;
@@ -805,7 +898,7 @@
             try {
                 const resp = await fetch(`${API}/api/brainstorm`, {
                     method: "POST", headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ step: currentData.chatHistory.length, messages: currentData.chatHistory, user_input: text, image_base64: imgToSend }),
+                    body: JSON.stringify({ step: currentData.chatHistory.length, messages: currentData.chatHistory, user_input: text, image_base64: imgsToSend[0] || null, image_base64_list: imgsToSend.length > 1 ? imgsToSend.slice(1) : null }),
                 });
                 if (!resp.ok) {
                     let detail = `HTTP ${resp.status}`;
@@ -896,8 +989,9 @@
                     addRef(topUrl, "diagram", "俯视调度图", ((sbItem.topViewDesc || "").trim() + " " + anns.join(" ")).trim());
                 }
                 if (sbItem && sbItem.trajView) addRef(sbItem.trajView, "diagram", "轨迹调度图", ((sbItem.trajViewDesc || "").trim() + " 本图是导演定稿的运动轨迹图纸：正上方俯视平面图，彩色实线箭头＝人物运动轨迹（含时间刻度与动作节点），黑色虚线箭头＝机位移动轨迹，「机位」符号＝摄影机起点。").trim());
-                // 候选参考：全部角色图 + 全部场景图 + 全部道具图（带元数据），由后端按分镜内容智能筛选相关的
-                (currentData.storyData.characters || []).forEach((c, i) => addRef(c.imgSrc || currentData.images[`char-${i}`], "character", c.name, c.description));
+                // 候选参考：全部角色图 + 全部场景图 + 全部道具图（带元数据），由后端按分镜内容智能筛选相关的。
+                // 角色元数据带的是"外貌权威"：重写/识图后的最新版（后端会作为外貌锚点注入生图指令，压过分镜提示词里的旧外貌）
+                (currentData.storyData.characters || []).forEach((c, i) => addRef(c.imgSrc || currentData.images[`char-${i}`], "character", c.name, c.edited_prompt || c.image_prompt || c.description));
                 (currentData.storyData.scenes || []).forEach((s, i) => addRef(s.imgSrc || currentData.images[`scene-${i}`], "scene", s.name, s.description));
                 addPropRefs();
             } else if (type === 'scene') {
@@ -1053,6 +1147,84 @@
                 }
             };
             reader.readAsDataURL(file);
+        }
+
+        // ================= 角色/场景/道具参考图本地上传 =================
+        // 与 genImage 相同只写 imgSrc：下游（场景图参考角色图、分镜图汇聚所有参考图）自动吃到上传的图
+        let uploadTargetRef = null; // {type:'char'|'scene'|'prop', index}
+        function uploadRefImage(type, index) {
+            uploadTargetRef = { type, index };
+            const input = document.getElementById("refImageUploadInput");
+            input.value = "";
+            input.click();
+        }
+        async function handleRefImageUpload(ev) {
+            const file = ev.target.files[0];
+            if (!file || !uploadTargetRef) return;
+            const { type, index } = uploadTargetRef;
+            const slot = document.getElementById(`${type}-img-${index}`);
+            if (slot) slot.innerHTML = "<div class='hint' style='color:#3b82f6'>📤 上传中…</div>";
+            const reader = new FileReader();
+            reader.onload = async () => {
+                try {
+                    const resp = await fetch(`${API}/api/upload-image`, {
+                        method: "POST", headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ image_base64: reader.result, filename: file.name }),
+                    });
+                    if (!resp.ok) {
+                        const err = await resp.json().catch(() => ({}));
+                        throw new Error(err.detail || "上传失败");
+                    }
+                    const data = await resp.json();
+                    const imgSrc = window.location.origin + data.image_url;
+                    const listKey = type === "char" ? "characters" : type === "scene" ? "scenes" : "props";
+                    const item = (currentData.storyData[listKey] || [])[index];
+                    if (item) item.imgSrc = imgSrc;
+                    saveCurrentProject();
+                    renderStory(currentData.storyData, true);
+                    // 传图后没有文字描述就自动识图补上（下游分镜提示词/冲突检测都依赖描述）
+                    if (item && !(item.description || "").trim()) {
+                        extractRefDesc(type, index, true, data.image_url);
+                    }
+                } catch (e) {
+                    if (slot) slot.innerHTML = `<div class='hint' style='color:#ef4444;'>上传失败: ${e.message}</div>`;
+                }
+            };
+            reader.readAsDataURL(file);
+        }
+
+        // 从参考图反推文字描述（DeepSeek 识图）。手动点按钮=明确要覆盖；自动（silent）只在描述为空时被调
+        async function extractRefDesc(type, index, silent = false, uploadedRelUrl = null) {
+            const listKey = type === "char" ? "characters" : type === "scene" ? "scenes" : "props";
+            const item = (currentData.storyData[listKey] || [])[index];
+            if (!item) return;
+            const rel = uploadedRelUrl || (item.imgSrc || "").replace(window.location.origin, "");
+            if (!rel || rel.startsWith("data:")) { if (!silent) alert("该卡片还没有参考图，请先上传或生成"); return; }
+            const btn = document.getElementById(`ref-analyze-${type}-${index}`);
+            if (btn && !silent) { btn.disabled = true; btn.textContent = "🔍 识图中…"; }
+            try {
+                const resp = await fetch(`${API}/api/analyze-ref-image`, {
+                    method: "POST", headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ image_url: rel, kind: type === "char" ? "character" : type, name: item.name || "" }),
+                });
+                if (!resp.ok) {
+                    const err = await resp.json().catch(() => ({}));
+                    throw new Error(err.detail || "识图失败");
+                }
+                const data = await resp.json();
+                item.description = data.description;
+                // 提示词：手动改过的（edited_prompt）绝不覆盖；没有才写入 image_prompt
+                if (!(item.edited_prompt || "").trim() && !(item.image_prompt || "").trim()) {
+                    item.image_prompt = data.image_prompt || "";
+                }
+                saveCurrentProject();
+                renderStory(currentData.storyData, true);
+            } catch (e) {
+                if (!silent) alert(`识图失败：${e.message}${(item.edited_prompt || "").trim() ? "\n（你手动改过的提示词未被覆盖）" : ""}`);
+                else console.warn("自动识图失败（可稍后点 🔍 识图按钮重试）:", e.message);
+            } finally {
+                if (btn && !silent) { btn.disabled = false; btn.textContent = "🔍 识图"; }
+            }
         }
 
         // ================= 调度参考图（俯视/轨迹）：口述 → AI 解析坐标 → 程序精确绘制平面图纸 =================
@@ -1242,6 +1414,172 @@
             const fb = document.getElementById(`frame-btn-${sbId}`);
             if (fb && !on) fb.textContent = (sbById(sbId)?.topViewFrame ? "🔲 重画取景框" : "🔲 画取景框");
         }
+        // ================= 拖拽编辑：在调度图上直接拖动角色/轨迹拐点/陈设/机位，松手即重绘图纸 =================
+        // 颜色与后端 _DIAGRAM_PALETTE 保持一致，chip 颜色 = 图纸上该角色的人偶颜色
+        const DIAGRAM_PALETTE = ["#e6194b", "#3cb44b", "#4363d8", "#f58231", "#911eb4", "#008080", "#f032e6", "#9a6324", "#000075", "#800000"];
+        const _dragChipState = {};   // key = sbId:kind → true 表示该调度图处于拖拽编辑模式（跨重渲染保持）
+        const _clamp01 = v => Math.min(1, Math.max(0, v));
+        function diagPlotKey(kind) { return kind === "trajectory" ? "trajViewPlot" : "topViewPlot"; }
+        function diagUrlKey(kind) { return kind === "trajectory" ? "trajView" : "topView"; }
+        function diagCamKey(kind) { return kind === "trajectory" ? "trajViewCamSummary" : "topViewCamSummary"; }
+
+        function toggleDiagramDrag(sbId, kind) {
+            const key = sbId + ":" + kind;
+            _dragChipState[key] = !_dragChipState[key];
+            if (_dragChipState[key]) {
+                // 拖拽与画框/机位/另一种图的拖拽互斥：开一个关其余
+                diagramModeState[sbId] = null;
+                _dragChipState[sbId + ":" + (kind === "topview" ? "trajectory" : "topview")] = false;
+            }
+            renderStoryboards(currentData.storyData); // 重渲染后由 refreshDiagramDrag 重建/移除 chips
+        }
+
+        // 渲染后调用：按 _dragChipState 给各调度图重建可拖拽 chips（角色/机位/陈设/轨迹拐点）。
+        // 用状态签名做守卫：状态没变就不动 DOM——本函数自己会增删节点，而 MutationObserver
+        // 监听的正是分镜列表，不加守卫会"重建→触发 observer→再重建"无限循环
+        function refreshDiagramDrag() {
+            document.querySelectorAll("[data-diag='1']").forEach(wrap => {
+                wrap.querySelectorAll("img").forEach(img => { img.draggable = false; });
+                const sbId = wrap.dataset.sb, kind = wrap.dataset.kind;
+                const on = !!_dragChipState[sbId + ":" + kind];
+                const sb = on ? sbById(sbId) : null;
+                const plot = sb ? sb[diagPlotKey(kind)] : null;
+                const sig = on ? (JSON.stringify(plot) || "on") : "off";
+                if (wrap._dragSig === sig) return; // 状态没变：跳过重建
+                wrap._dragSig = sig;
+                wrap.querySelectorAll(".diag-chips").forEach(el => el.remove());
+                wrap.dataset.dragMode = on ? "1" : "0";
+                wrap.style.outline = on ? "2px solid #8b5cf6" : "";
+                const btn = document.getElementById(`drag-btn-${kind}-${sbId}`);
+                if (btn) btn.textContent = on ? "✅ 完成拖拽" : "✋ 拖拽编辑";
+                if (!on || !plot) return;
+                const layer = document.createElement("div");
+                layer.className = "diag-chips";
+                layer.style.cssText = "position:absolute; inset:0; pointer-events:none;";
+                wrap.appendChild(layer);
+                const chars = plot.characters || [];
+                chars.forEach((c, ci) => {
+                    if (typeof c.x !== "number" || typeof c.y !== "number") return;
+                    const col = DIAGRAM_PALETTE[ci % DIAGRAM_PALETTE.length];
+                    addDragChip(layer, wrap, sb, kind, {
+                        x: c.x, y: c.y, label: c.name || "?", color: col,
+                        tip: `拖动 ${c.name || "角色"}（整条运动轨迹跟着平移）`,
+                        apply: (pc, np) => {
+                            const cc = (pc.characters || [])[ci]; if (!cc) return;
+                            const dx = np.x - cc.x, dy = np.y - cc.y;
+                            cc.x = np.x; cc.y = np.y;
+                            (cc.path || []).forEach(pt => { pt[0] = _clamp01(pt[0] + dx); pt[1] = _clamp01(pt[1] + dy); });
+                        },
+                    });
+                    // 轨迹拐点：拖动单个拐点只改它自己（起点人偶不动）
+                    (c.path || []).forEach((pt, pi) => {
+                        if (typeof pt[0] !== "number" || typeof pt[1] !== "number") return;
+                        addDragChip(layer, wrap, sb, kind, {
+                            x: pt[0], y: pt[1], small: true, color: col,
+                            tip: `拖动 ${c.name || "角色"} 的轨迹拐点 ${pi + 1}`,
+                            apply: (pc, np) => {
+                                const p = ((pc.characters || [])[ci]?.path || [])[pi]; if (!p) return;
+                                p[0] = np.x; p[1] = np.y;
+                            },
+                        });
+                    });
+                });
+                const cam = plot.camera;
+                if (cam && typeof cam.x === "number" && typeof cam.y === "number") {
+                    addDragChip(layer, wrap, sb, kind, {
+                        x: cam.x, y: cam.y, label: "📷", color: "#111827",
+                        tip: "拖动机位（移动路径跟着平移）",
+                        apply: (pc, np) => {
+                            const cm = pc.camera; if (!cm) return;
+                            const dx = np.x - cm.x, dy = np.y - cm.y;
+                            cm.x = np.x; cm.y = np.y;
+                            (cm.path || []).forEach(pt => { pt[0] = _clamp01(pt[0] + dx); pt[1] = _clamp01(pt[1] + dy); });
+                        },
+                    });
+                }
+                (plot.props || []).forEach((p, pi) => {
+                    if (typeof p.x !== "number" || typeof p.y !== "number") return;
+                    addDragChip(layer, wrap, sb, kind, {
+                        x: p.x, y: p.y, label: "🧱", color: "#8a93a3",
+                        tip: `拖动陈设「${p.label || ""}」`,
+                        apply: (pc, np) => {
+                            const pp = (pc.props || [])[pi]; if (!pp) return;
+                            pp.x = np.x; pp.y = np.y;
+                        },
+                    });
+                });
+            });
+        }
+
+        function addDragChip(layer, wrap, sb, kind, def) {
+            const chip = document.createElement("div");
+            const size = def.small ? 15 : 26;
+            chip.style.cssText = `position:absolute; left:${(def.x * 100).toFixed(2)}%; top:${(def.y * 100).toFixed(2)}%;` +
+                `width:${size}px; height:${size}px; background:${def.color}; border:2px solid #fff; border-radius:50%;` +
+                `box-shadow:0 1px 4px rgba(0,0,0,.45); transform:translate(-50%,-50%); cursor:move; pointer-events:auto;` +
+                `z-index:5; touch-action:none; user-select:none;` +
+                (def.small ? "" : `display:flex; align-items:center; justify-content:center; font-size:13px; color:#fff; font-weight:600; text-shadow:0 0 2px rgba(0,0,0,.5);`);
+            if (!def.small && def.label) chip.textContent = def.label;
+            chip.title = def.tip || "";
+            layer.appendChild(chip);
+            chip.addEventListener("pointerdown", e => {
+                if (e.button !== 0) return;
+                e.preventDefault(); e.stopPropagation(); // 不触发图整体的画框/机位逻辑
+                const toNorm = ev => {
+                    const r = wrap.getBoundingClientRect();
+                    return { x: _clamp01((ev.clientX - r.left) / r.width), y: _clamp01((ev.clientY - r.top) / r.height) };
+                };
+                const startPos = { x: def.x, y: def.y };
+                const onMove = ev => {
+                    const p = toNorm(ev);
+                    chip.style.left = (p.x * 100) + "%"; chip.style.top = (p.y * 100) + "%";
+                    chip._pos = p;
+                };
+                const detach = () => {
+                    window.removeEventListener("pointermove", onMove);
+                    window.removeEventListener("pointerup", onUp);
+                    window.removeEventListener("pointercancel", onUp);
+                };
+                const onUp = async ev => {
+                    detach();
+                    const np = chip._pos || toNorm(ev);
+                    chip._pos = null;
+                    // 几乎没动：视为误触，复位即可
+                    if (Math.abs(np.x - startPos.x) < 0.006 && Math.abs(np.y - startPos.y) < 0.006) {
+                        chip.style.left = (startPos.x * 100) + "%"; chip.style.top = (startPos.y * 100) + "%";
+                        return;
+                    }
+                    // 在副本上改坐标，后端重绘成功才写回 sb；失败则原数据不动
+                    let plotCopy;
+                    try { plotCopy = JSON.parse(JSON.stringify(sb[diagPlotKey(kind)] || {})); } catch (_) { return; }
+                    def.apply(plotCopy, np);
+                    await commitDiagramDrag(sb, kind, plotCopy);
+                };
+                try { chip.setPointerCapture(e.pointerId); } catch (_) {}
+                window.addEventListener("pointermove", onMove);
+                window.addEventListener("pointerup", onUp);
+                window.addEventListener("pointercancel", onUp);
+            });
+        }
+
+        async function commitDiagramDrag(sb, kind, plotCopy) {
+            try {
+                const r = await fetch(`${API}/api/rerender-diagram`, {
+                    method: "POST", headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ plot: plotCopy, kind }),
+                });
+                if (!r.ok) throw new Error("HTTP " + r.status);
+                const j = await r.json();
+                sb[diagUrlKey(kind)] = j.image_url;
+                sb[diagPlotKey(kind)] = j.plot;
+                sb[diagCamKey(kind)] = j.cam_summary || "";
+                saveCurrentProject();
+            } catch (e) {
+                alert("重绘调度图失败：" + (e.message || e) + "（原坐标未改动，可重试）");
+            }
+            renderStoryboards(currentData.storyData); // 拖拽模式仍开着，重绘后 chips 按 new plot 重建
+        }
+
         function sbById(sbId) {
             return (currentData.storyData?.storyboards || []).find(s => s._id === sbId) || null;
         }
@@ -1275,6 +1613,8 @@
                 // 用 Pointer 事件 + 指针捕获：按住拖动时即使指针移出图片也持续收到 move/up，不会中断
                 wrap.addEventListener("pointerdown", e => {
                     if (e.button !== 0) return;
+                    // 拖拽编辑模式：chips 自己接管，图整体不进入画框/机位逻辑
+                    if (wrap.dataset.dragMode === "1") return;
                     const rectOf = ev => {
                         const r = wrap.getBoundingClientRect();
                         return {
@@ -1382,7 +1722,7 @@
         // （防止某条更新路径只换了 diag-slot 内容、没走 renderStoryboards 导致事件丢失）
         const _sbListObserverEl = document.getElementById("storyboardsList");
         if (_sbListObserverEl && window.MutationObserver) {
-            new MutationObserver(() => attachFrameDrawing())
+            new MutationObserver(() => { attachFrameDrawing(); refreshDiagramDrag(); })
                 .observe(_sbListObserverEl, { childList: true, subtree: true });
         }
         // 把取景框（红框+框外压暗）与机位符号（红点+机位字样）烙进俯视图副本，AI 看到的参考图上带导演标注
@@ -1632,19 +1972,23 @@
                         </div>
                         <div id="diag-slot-${kind}-${sb._id}" style="margin-top:8px;">${url
                             ? (isTop
-                                ? `<div id="frame-wrap-${sb._id}" data-sb="${sb._id}" data-frame-draw="1" style="position:relative; display:inline-block;">
+                                ? `<div id="frame-wrap-${sb._id}" data-sb="${sb._id}" data-kind="topview" data-diag="1" data-frame-draw="1" style="position:relative; display:inline-block;">
                                     <img src="${url}" style="max-width:340px; max-height:340px; border-radius:8px; border:1px solid var(--border-color); display:block;">
                                     ${sb.topViewFrame ? `<div style="position:absolute; left:${(sb.topViewFrame.x * 100).toFixed(2)}%; top:${(sb.topViewFrame.y * 100).toFixed(2)}%; width:${(sb.topViewFrame.w * 100).toFixed(2)}%; height:${(sb.topViewFrame.h * 100).toFixed(2)}%; border:2px dashed #ef4444; background:rgba(239,68,68,.08); pointer-events:none;"></div>` : ""}
                                     ${sb.topViewCam ? `<div id="cam-mark-${sb._id}" style="position:absolute; left:${(sb.topViewCam.x * 100).toFixed(2)}%; top:${(sb.topViewCam.y * 100).toFixed(2)}%; transform:translate(-50%,-50%); pointer-events:none; font-size:26px; text-shadow:0 0 3px #fff, 0 0 4px #fff;">📷</div>` : ""}
                                 </div>
                                 ${(sb.topViewFrame || sb.topViewCam) ? `<span class="hint" style="display:block; margin:2px 0 0; max-width:340px;">${sb.topViewFrame ? "红框＝取景范围（裁切参考，不是机位）" : ""}${sb.topViewFrame && sb.topViewCam ? "；" : ""}${sb.topViewCam ? "📷＝机位：镜头架在此处朝视锥方向拍，画面＝从机位望出去；机位上/旁/后方的人不入画（程序判定）" : ""}</span>` : `<span class="hint" style="display:block; margin:2px 0 0; max-width:340px;">点「画取景框」拖拽框定取景范围，或点「标机位」在图上点选机位</span>`}`
-                                : `<img src="${url}" style="max-width:340px; max-height:340px; border-radius:8px; border:1px solid var(--border-color);">`)
+                                : `<div id="diag-wrap-trajectory-${sb._id}" data-sb="${sb._id}" data-kind="trajectory" data-diag="1" style="position:relative; display:inline-block;"><img src="${url}" draggable="false" style="max-width:340px; max-height:340px; border-radius:8px; border:1px solid var(--border-color); display:block;"></div>`)
                             : `<span class="hint" style="margin:0; display:block;">可 AI 生成、上传本地图，或借用其他分镜已生成的${label}</span>`}</div>
                         ${url && isTop ? `<div style="margin-top:4px; display:flex; gap:6px; flex-wrap:wrap; align-items:center;">
                             <button class="btn-sm btn-ghost" id="frame-btn-${sb._id}" onclick="toggleFrameDraw('${sb._id}', this)" title="在俯视图上拖拽画一个矩形，表示本分镜的取景范围">${sb.topViewFrame ? "🔲 重画取景框" : "🔲 画取景框"}</button>
                             ${sb.topViewFrame ? `<button class="btn-sm btn-ghost" onclick="clearTopViewFrame('${sb._id}')">🗑 清除取景框</button>` : ""}
                             <button class="btn-sm btn-ghost" id="cam-btn-${sb._id}" onclick="toggleCamMark('${sb._id}', this)" title="在俯视图上点击标注机位位置（远近与左右换算以标注机位为准）">${sb.topViewCam ? "📷 移动机位" : "📷 标机位"}</button>
                             ${sb.topViewCam ? `<button class="btn-sm btn-ghost" onclick="clearTopViewCam('${sb._id}')">🗑 清除机位</button>` : ""}
+                            <button class="btn-sm btn-ghost" id="drag-btn-topview-${sb._id}" onclick="toggleDiagramDrag('${sb._id}', 'topview', this)" ${sb.topViewPlot ? "" : `disabled title="这张图没有坐标数据（可能是本地上传的图），无法拖拽"`} title="在图上直接拖动角色/机位/陈设，松手即重绘图纸（角色的运动轨迹会跟着一起平移）">✋ 拖拽编辑</button>
+                        </div>` : ""}
+                        ${url && !isTop ? `<div style="margin-top:4px; display:flex; gap:6px; flex-wrap:wrap; align-items:center;">
+                            <button class="btn-sm btn-ghost" id="drag-btn-trajectory-${sb._id}" onclick="toggleDiagramDrag('${sb._id}', 'trajectory', this)" ${sb.trajViewPlot ? "" : `disabled title="这张图没有坐标数据（可能是本地上传的图），无法拖拽"`} title="在图上直接拖动角色/轨迹拐点/机位，松手即重绘图纸">✋ 拖拽编辑</button>
                         </div>` : ""}
                         ${url ? `<label style="font-size:12px; display:flex; gap:4px; align-items:center; cursor:pointer; margin-top:6px;"><input type="checkbox" ${sb[useKey] !== false ? "checked" : ""} onchange="toggleDiagramUse('${sb._id}', '${kind}', this.checked)"> 生成视频时参考</label>` : ""}
                     `;
@@ -1675,7 +2019,6 @@
                     <div class="shot-body" style="flex:1;">
                         <div style="display:flex; align-items:flex-start;">
                             <div style="flex:1;">
-                                <div class="shot-desc">${renderMarkdown(sb.description || "")}</div>
                                 <div class="shot-dialogue">${sb.dialogue ? "「" + renderMarkdown(sb.dialogue) + "」" : ""}</div>
                             </div>
                             <button class="btn-del-item" onclick="deleteStoryboard('${sb._id}')">删除</button>
@@ -1737,6 +2080,8 @@
             attachFrameDrawing();
             // 重渲染重建了 DOM：恢复各分镜的标注模式（dataset 会丢，按 diagramModeState 套回）
             document.querySelectorAll("[data-frame-draw='1']").forEach(w => applyDiagramMode(w.dataset.sb));
+            // 恢复调度图拖拽编辑模式：重建可拖拽 chips、同步按钮文字
+            refreshDiagramDrag();
             initSortable();
         }
 
@@ -1764,7 +2109,6 @@
                 const card = document.createElement("div"); card.className = "card";
                 card.innerHTML = `
                     <div style="display:flex; align-items:center;"><input class="label" style="flex:1; min-width:0; border:none; border-bottom:1px dashed transparent; background:transparent; padding:0; font-weight:600; color:inherit; font-size:inherit;" title="点击修改名称" value="${escapeAttr(c.name || "角色 " + (i+1))}" onchange="renameItem('character', ${i}, this.value)"><button class="btn-del-item" onclick="deleteItem('character', ${i})">删除</button></div>
-                    <div class="value">${renderMarkdown(c.description || "")}</div>
                     <textarea id="char-prompt-${i}" class="prompt-edit-area" oninput="autoGrow(this);updatePrompt('character', ${i}, this.value)" title="可直接修改，或把新要求写进来后点 ✨重写">${currentPrompt}</textarea>
                     <div style="margin-top:6px; display:flex; gap:6px; align-items:center;">
                         <button class="btn-rewrite" onclick="regeneratePrompt('character', ${i})">✨ 重写</button>
@@ -1775,6 +2119,8 @@
                     <div class="image-slot" id="char-img-${i}" ${savedImg ? `data-image-url="${savedImg}"` : ''}>${savedImg ? `<img src="${savedImg}">` : ''}</div>
                     <div style="margin-top:12px; display:flex; flex-wrap:wrap; gap:10px;">
                         <button onclick="genImage('char', ${i})" style="flex:1;">${savedImg ? '重新生成' : '生成'}</button>
+                        <button class="btn-download" onclick="uploadRefImage('char', ${i})" title="上传本地图片直接作为该角色的参考图（分镜图会参考它）">📁 传图</button>
+                        ${savedImg ? `<button class="btn-download" id="ref-analyze-char-${i}" onclick="extractRefDesc('char', ${i})" title="从参考图反推外貌描述与生图提示词">🔍 识图</button>` : ''}
                         ${savedImg ? `<button class="btn-download" onclick="downloadImage('${savedImg}', '角色_${escapeAttr(c.name || "角色")}.png')">📥 保存原图</button>` : ''}
                     </div>
                 `; charGrid.appendChild(card);
@@ -1789,7 +2135,6 @@
                 const card = document.createElement("div"); card.className = "card";
                 card.innerHTML = `
                     <div style="display:flex; align-items:center;"><input class="label" style="flex:1; min-width:0; border:none; border-bottom:1px dashed transparent; background:transparent; padding:0; font-weight:600; color:inherit; font-size:inherit;" title="点击修改名称" value="${escapeAttr(s.name || "场景 " + (i+1))}" onchange="renameItem('scene', ${i}, this.value)"><button class="btn-del-item" onclick="deleteItem('scene', ${i})">删除</button></div>
-                    <div class="value">${renderMarkdown(s.description || "")}</div>
                     <textarea id="scene-prompt-${i}" class="prompt-edit-area" oninput="autoGrow(this);updatePrompt('scene', ${i}, this.value)" title="可直接修改，或把新要求写进来后点 ✨重写">${currentPrompt}</textarea>
                     <div style="margin-top:6px; display:flex; gap:6px; align-items:center;">
                         <button class="btn-rewrite" onclick="regeneratePrompt('scene', ${i})">✨ 重写</button>
@@ -1800,6 +2145,8 @@
                     <div class="image-slot" id="scene-img-${i}" ${savedImg ? `data-image-url="${savedImg}"` : ''}>${savedImg ? `<img src="${savedImg}">` : ''}</div>
                     <div style="margin-top:12px; display:flex; flex-wrap:wrap; gap:10px;">
                         <button onclick="genImage('scene', ${i})" style="flex:1;">${savedImg ? '重新生成' : '生成'}</button>
+                        <button class="btn-download" onclick="uploadRefImage('scene', ${i})" title="上传本地图片直接作为该场景的参考图（分镜图会参考它）">📁 传图</button>
+                        ${savedImg ? `<button class="btn-download" id="ref-analyze-scene-${i}" onclick="extractRefDesc('scene', ${i})" title="从参考图反推场景描述与生图提示词">🔍 识图</button>` : ''}
                         ${savedImg ? `<button class="btn-download" onclick="downloadImage('${savedImg}', '场景_${escapeAttr(s.name || "场景")}.png')">📥 保存原图</button>` : ''}
                     </div>
                 `; sceneGrid.appendChild(card);
@@ -1814,7 +2161,6 @@
                 const card = document.createElement("div"); card.className = "card";
                 card.innerHTML = `
                     <div style="display:flex; align-items:center;"><input class="label" style="flex:1; min-width:0; border:none; border-bottom:1px dashed transparent; background:transparent; padding:0; font-weight:600; color:inherit; font-size:inherit;" title="点击修改名称" value="${escapeAttr(p.name || "道具 " + (i+1))}" onchange="renameItem('prop', ${i}, this.value)"><button class="btn-del-item" onclick="deleteItem('prop', ${i})">删除</button></div>
-                    <div class="value">${renderMarkdown(p.description || "")}</div>
                     <textarea id="prop-prompt-${i}" class="prompt-edit-area" oninput="autoGrow(this);updatePrompt('prop', ${i}, this.value)" title="可直接修改，或把新要求写进来后点 ✨重写">${currentPrompt}</textarea>
                     <div style="margin-top:6px; display:flex; gap:6px; align-items:center;">
                         <button class="btn-rewrite" onclick="regeneratePrompt('prop', ${i})">✨ 重写</button>
@@ -1823,6 +2169,8 @@
                     <div class="image-slot" id="prop-img-${i}" ${savedImg ? `data-image-url="${savedImg}"` : ''}>${savedImg ? `<img src="${savedImg}">` : ''}</div>
                     <div style="margin-top:12px; display:flex; flex-wrap:wrap; gap:10px;">
                         <button onclick="genImage('prop', ${i})" style="flex:1;">${savedImg ? '重新生成' : '生成'}</button>
+                        <button class="btn-download" onclick="uploadRefImage('prop', ${i})" title="上传本地图片直接作为该道具的参考图（分镜图会参考它）">📁 传图</button>
+                        ${savedImg ? `<button class="btn-download" id="ref-analyze-prop-${i}" onclick="extractRefDesc('prop', ${i})" title="从参考图反推道具描述与生图提示词">🔍 识图</button>` : ''}
                         ${savedImg ? `<button class="btn-download" onclick="downloadImage('${savedImg}', '道具_${escapeAttr(p.name || "道具")}.png')">📥 保存原图</button>` : ''}
                     </div>
                 `; propGrid.appendChild(card);
@@ -1862,7 +2210,7 @@
         // 要求输入框自动增高（上限 200px，超出后内部滚动）
         function autoGrow(el) {
             el.style.height = "auto";
-            el.style.height = Math.min(el.scrollHeight, 200) + "px";
+            el.style.height = Math.min(el.scrollHeight, 450) + "px";
         }
         // AU 表情分析：从提示词提取表情/动作关键词 → FACS AU 编码（词库优先，AI 兜底）
         async function analyzeAU(type, indexOrId) {
@@ -1940,7 +2288,7 @@
             if (!payload.old_prompt) return alert("提示词为空：先在框里写入内容或你的新要求");
             payload.style_bible = sd.style_bible || "";
             payload.synopsis = sd.synopsis || "";
-            payload.characters = (sd.characters || []).map(c => ({ name: c.name || "", image_prompt: c.edited_prompt || c.image_prompt || "" }));
+            payload.characters = (sd.characters || []).map(c => ({ name: c.name || "", image_prompt: c.edited_prompt || c.image_prompt || c.description || "" }));
             try {
                 const resp = await fetch(`${API}/api/regenerate-prompt`, {
                     method: "POST", headers: { "Content-Type": "application/json" },
@@ -2172,12 +2520,16 @@
                 let workflowId = getSelectedWorkflowId();
                 // 测量参考图的实际宽高比，后端据此自动选横屏/竖屏档位（H3 工作流默认出竖屏）。
                 // 第一张探测失败（加载错误/超时）时依次尝试后面的图，全失败才放弃——
-                // 探测失败会导致后端拿不到宽高比而回退竖屏默认档，横屏项目就会出竖屏视频
+                // 探测失败会导致后端拿不到宽高比而回退竖屏默认档，横屏项目就会出竖屏视频。
+                // 带超时兜底：图片加载卡死时 Promise 永不 resolve，会卡住整个生成流程
                 const probeAspect = (url) => new Promise(resolve => {
                     if (!url) return resolve(null);
                     const probe = new Image();
-                    probe.onload = () => resolve(probe.naturalHeight > 0 ? probe.naturalWidth / probe.naturalHeight : null);
-                    probe.onerror = () => resolve(null);
+                    let settled = false;
+                    const finish = (v) => { if (!settled) { settled = true; resolve(v); } };
+                    probe.onload = () => finish(probe.naturalHeight > 0 ? probe.naturalWidth / probe.naturalHeight : null);
+                    probe.onerror = () => finish(null);
+                    setTimeout(() => finish(null), 4000);
                     probe.src = url;
                 });
                 let imageAspect = null;
@@ -2186,6 +2538,14 @@
                     if (imageAspect) break;
                 }
                 if (!imageAspect) imageAspect = await probeAspect(body.first_frame_url || body.last_frame_url || null);
+                // 全部探测失败：用界面上"分镜图比例"选择器的值兜底（横屏 16:9 / 方图 1:1 / 竖屏 9:16），
+                // 保证后端一定能拿到宽高比；若实测图与所选比例不符，后端仍以实测图为准
+                if (!imageAspect) {
+                    const aspectSel = document.getElementById("aspectSelect");
+                    const v = (aspectSel && aspectSel.value) || "portrait";
+                    imageAspect = v === "landscape" ? (16 / 9) : (v === "square" ? 1 : (9 / 16));
+                    console.warn("参考图宽高比探测失败，按分镜图比例选择器兜底:", v, imageAspect);
+                }
                 const videoResp = await fetch(`${API}/api/generate-video`, {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
