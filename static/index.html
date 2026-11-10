@@ -2170,15 +2170,22 @@
                 // 新模板会额外产出 video_prompt（专给图生视频的运动描述），旧项目没有该字段则回退 image_prompt
                 let prompt = sbItem.edited_prompt || sbItem.video_prompt || sbItem.image_prompt || sbItem.description;
                 let workflowId = getSelectedWorkflowId();
-                // 测量首张参考图的实际宽高比，后端据此自动选横屏/竖屏档位（H3 工作流默认出竖屏）
-                const firstImgUrl = (body.image_urls && body.image_urls[0]) || body.first_frame_url || body.last_frame_url || null;
-                const imageAspect = await new Promise(resolve => {
-                    if (!firstImgUrl) return resolve(null);
+                // 测量参考图的实际宽高比，后端据此自动选横屏/竖屏档位（H3 工作流默认出竖屏）。
+                // 第一张探测失败（加载错误/超时）时依次尝试后面的图，全失败才放弃——
+                // 探测失败会导致后端拿不到宽高比而回退竖屏默认档，横屏项目就会出竖屏视频
+                const probeAspect = (url) => new Promise(resolve => {
+                    if (!url) return resolve(null);
                     const probe = new Image();
                     probe.onload = () => resolve(probe.naturalHeight > 0 ? probe.naturalWidth / probe.naturalHeight : null);
                     probe.onerror = () => resolve(null);
-                    probe.src = firstImgUrl;
+                    probe.src = url;
                 });
+                let imageAspect = null;
+                for (const u of (body.image_urls || []).slice(0, 3)) {
+                    imageAspect = await probeAspect(u);
+                    if (imageAspect) break;
+                }
+                if (!imageAspect) imageAspect = await probeAspect(body.first_frame_url || body.last_frame_url || null);
                 const videoResp = await fetch(`${API}/api/generate-video`, {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },

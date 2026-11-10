@@ -1811,6 +1811,13 @@ def local_url_to_data_uri(url: str) -> str:
         b64 = base64.b64encode(f.read()).decode()
     return f"data:image/{mime};base64,{b64}"
 
+# ---------- 按参考图宽高比自动选横/竖屏档位 ----------
+# H3 系工作流默认档是竖屏（如 768p竖=768×1344），横屏参考图不改档位就会输出竖屏视频。
+# AutoDL 工作流详情接口（/api/v1/comfyui/workflows/{id}）的 input_rules 里有 resolution
+# 参数的官方枚举（如 "480p竖/480p横/480p(1:1)/768p竖/768p横/768p(1:1)"），据此选档最可靠。
+# 档位列表必须跨请求缓存（此前缓存放函数内每次清空，查询一失败就丢档位 → 横屏变默认竖屏）
+_WORKFLOW_RES_CACHE: dict = {}
+
 @app.post("/api/generate-video")
 async def generate_video(req: VideoRequest):
     # 帧模式归一化（先算好，才能决定用哪支令牌）
@@ -1848,20 +1855,25 @@ async def generate_video(req: VideoRequest):
     # H3 系工作流默认档是竖屏（如 768p竖=768×1344），横屏参考图不改档位就会输出竖屏视频。
     # AutoDL 工作流详情接口（/api/v1/comfyui/workflows/{id}）的 input_rules 里有 resolution
     # 参数的官方枚举（如 "480p竖/480p横/480p(1:1)/768p竖/768p横/768p(1:1)"），据此选档最可靠。
-    _workflow_res_cache: dict = {}
     async def get_resolution_options(client, headers):
-        if target_workflow in _workflow_res_cache:
-            return _workflow_res_cache[target_workflow]
-        try:
-            r = await client.get(f"{AUTODL_BASE}/api/v1/comfyui/workflows/{target_workflow}", headers=headers)
-            data = (r.json() or {}).get("data") or {}
-            rules = data.get("input_rules") or {}
-            options = [o.get("label") for o in ((rules.get("resolution") or {}).get("options") or []) if o.get("label")]
-            print(f"📋 工作流 {target_workflow} 支持 resolution 档位: {options or '（无此参数，用默认档）'}")
-        except Exception as e:
-            print(f"⚠️ 查询工作流 {target_workflow} 参数失败（不影响提交）: {type(e).__name__}: {e}")
-            options = []
-        _workflow_res_cache[target_workflow] = options
+        if target_workflow in _WORKFLOW_RES_CACHE:
+            return _WORKFLOW_RES_CACHE[target_workflow]
+        options = []
+        for attempt in (1, 2):
+            try:
+                r = await client.get(f"{AUTODL_BASE}/api/v1/comfyui/workflows/{target_workflow}", headers=headers)
+                data = (r.json() or {}).get("data") or {}
+                rules = data.get("input_rules") or {}
+                options = [o.get("label") for o in ((rules.get("resolution") or {}).get("options") or []) if o.get("label")]
+                if options:
+                    break
+                print(f"⚠️ 工作流 {target_workflow} 未返回 resolution 枚举（第{attempt}次）")
+            except Exception as e:
+                print(f"⚠️ 查询工作流 {target_workflow} 参数失败（第{attempt}次）: {type(e).__name__}: {e}")
+            await asyncio.sleep(1.0)
+        if options:
+            _WORKFLOW_RES_CACHE[target_workflow] = options
+        print(f"📋 工作流 {target_workflow} 支持 resolution 档位: {options or '（无此参数，用默认档）'}")
         return options
 
     def pick_resolution(options: list, aspect) -> str | None:
