@@ -2615,7 +2615,12 @@
                     throw new Error(errMsg);
                 }
                 const vData = await videoResp.json();
-                log.textContent = `✅ 提交成功，排队中…`;
+                if (vData.warning) {
+                    // 首尾帧构图差异预检警告：不阻断任务，提示用户可能的崩坏风险与对策
+                    log.style.color = "#d97706";
+                    alert("⚠️ 生成前预检提醒\n\n" + vData.warning + "\n\n本次任务已照常提交，可等结果决定是否拆镜重拍。");
+                }
+                log.textContent = vData.warning ? "⚠️ 已提交（有预检提醒，见弹窗）· 排队中…" : `✅ 提交成功，排队中…`;
                 log.style.color = "#3b82f6";
                 showSbProgress(sbId, "⏳ 排队中，等待云端分配 GPU…", 3);
                 const taskId = vData.task_id || vData.id;

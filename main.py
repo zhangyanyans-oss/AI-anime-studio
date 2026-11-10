@@ -2505,6 +2505,35 @@ def measure_local_image_aspect(url: str | None) -> float | None:
     except Exception:
         return None
 
+def _frame_divergence(url1: str, url2: str) -> float | None:
+    """估算两张帧图的低频构图差异（0-1）。32x18 灰度缩略图逐像素平均绝对差：
+    实测同一图=0、同一镜头相邻帧≈0.001、全景→特写的跨构图≈0.18。
+    读取失败返回 None（预检失败不阻断生成）。仅本地 /static/uploads/ 路径。"""
+    def resolve(u: str):
+        if not u:
+            return None
+        name = str(u).split("/")[-1].split("?")[0]
+        if not re.fullmatch(r"[\w\-]+\.(jpg|jpeg|png|webp)", name):
+            return None
+        p = Path("static") / "uploads" / name
+        if not p.is_file():
+            return None
+        return p
+
+    import numpy as np
+    try:
+        from PIL import Image
+        p1, p2 = resolve(url1), resolve(url2)
+        if not p1 or not p2:
+            return None
+        a = np.asarray(Image.open(p1).convert("L").resize((32, 18)), dtype=int)
+        b = np.asarray(Image.open(p2).convert("L").resize((32, 18)), dtype=int)
+        return float(np.abs(a - b).mean() / 255.0)
+    except Exception as e:
+        print(f"⚠️ 首尾帧差异预检失败（忽略）: {type(e).__name__}: {e}")
+        return None
+
+
 @app.post("/api/generate-video")
 async def generate_video(req: VideoRequest):
     # 帧模式归一化（先算好，才能决定用哪支令牌）
@@ -2534,6 +2563,8 @@ async def generate_video(req: VideoRequest):
                       "【身份唯一规则】画面中每个角色全程只有一个身体、一份存在：上述走位是画面中已有角色的连续位移，"
                       "不是新角色入场；严禁出现复制人、分身、双胞胎——比如出现两个憨憨相向而行、一个走近镜头另一个还站在原地，都是错误；"
                       "角色从画面外走入时，走进来的就是他本人，画面里原本的他平滑移动过来即可。"
+                      "走位只能通过人物身体在画面中的连续位移来表现，"
+                      "严禁把走位路径画成地面上的红色虚线、箭头、标线、跑道线、光轨等任何地面标记——画面是真实世界，不是图纸。"
                       "白底俯视调度图纸类参考图仅用于理解走位方向与机位关系，"
                       "严禁把图纸本身、白底平面图、人偶棋子图标、扇形视锥、虚线箭头画进视频画面。")
 
@@ -2546,7 +2577,10 @@ async def generate_video(req: VideoRequest):
                        "人物从前景走过让出视野等，严禁凭空生成、严禁突然出现在画面中央；\n"
                        "③首尾帧构图差异（机位朝向、人物站位变化）用连续的镜头运动（摇镜/推拉/跟随/环绕）与连续的人物走位完成，"
                        "中间允许有多个过渡状态，严禁前半段静止在首帧、后半段硬切到尾帧；\n"
-                       "④过渡路径优先服从【运动轨迹指令】的走位与镜头运动方向；无轨迹指令时按两帧差异设计最自然的连续运镜。")
+                       "④过渡路径优先服从【运动轨迹指令】的走位与镜头运动方向；无轨迹指令时按两帧差异设计最自然的连续运镜；\n"
+                       "⑤场景背景（天空、建筑、地面、光照）全程连续存在且与首帧一致：镜头移动时背景随透视自然变化，"
+                       "严禁背景中途消失、变白、变成空白平面、或中途重绘成另一个场景。\n"
+                       "全片是【单一连续镜头】（one continuous shot）：中间没有任何剪辑点、没有场景切换、没有画面跳变。")
         elif frame_mode == "first":
             prompt += ("\n\n【首帧连续规则】首帧是视频第 1 帧：画面从首帧出发自然连续地动起来，"
                        "首帧里的人物连续存在、连续位移，新出现的人物/物体必须从画面边缘走入或被镜头运动带进画面，严禁凭空生成、硬切、瞬移。")
@@ -2735,7 +2769,20 @@ async def generate_video(req: VideoRequest):
         task_id = data.get("task_id") or (data.get("data") or {}).get("task_id") or data.get("id")
         if not task_id:
             raise HTTPException(500, f"未拿到 task_id：{data}")
-        return {"task_id": task_id, "raw": data}
+        result = {"task_id": task_id, "raw": data}
+        # 首尾帧差异预检：构图差异过大是中间帧崩坏（背景塌白/人物突变/硬切）的高发因素
+        if frame_mode == "first_last" and req.first_frame_url and req.last_frame_url:
+            div = await asyncio.to_thread(_frame_divergence, req.first_frame_url, req.last_frame_url)
+            if div is not None:
+                print(f"📊 首尾帧构图差异: {div:.3f}")
+                if div >= 0.30:
+                    result["warning"] = (f"首尾帧构图差异过大（{div:.0%}，相当于镜头大幅跨越）：中间过程极易崩坏"
+                                         f"（背景消失、人物突变、硬切）。强烈建议拆成两镜接拍：先拍从首帧到中间状态，"
+                                         f"再用「🎬 接拍下一镜」从尾帧接拍剩余动作。")
+                elif div >= 0.15:
+                    result["warning"] = (f"首尾帧构图差异较大（{div:.0%}）：中间过程可能出现不自然过渡。"
+                                         f"若生成结果有跳变，建议把运镜描述写进提示词（如\"镜头缓缓推近\"），或拆成两镜接拍。")
+        return result
 
 # ---------- 5. AutoDL 查询视频结果 ----------
 @app.get("/api/video-status/{task_id}")
